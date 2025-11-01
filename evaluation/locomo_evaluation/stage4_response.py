@@ -17,10 +17,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from evaluation.locomo_evaluation.config import ExperimentConfig
-from evaluation.locomo_evaluation.prompts import (
-    ANSWER_PROMPT_NEMORI,
-    ANSWER_PROMPT_NEMORI_COT,
-)
+from evaluation.locomo_evaluation.prompts.answer_prompts import ANSWER_PROMPT
 
 
 async def locomo_response(
@@ -30,19 +27,14 @@ async def locomo_response(
     question: str,
     experiment_config: ExperimentConfig,
 ) -> str:
-    if experiment_config.mode == "cot":
-        prompt = ANSWER_PROMPT_NEMORI_COT.format(context=context, question=question)
-    else:
-        prompt = ANSWER_PROMPT_NEMORI.format(context=context, question=question)
+    prompt = ANSWER_PROMPT.format(context=context, question=question)
     for i in range(experiment_config.max_retries):
         try:
             response = await llm_client.chat.completions.create(
                 model=llm_config["model"],
                 messages=[{"role": "system", "content": prompt}],
-                # temperature=llm_config["temperature"],
                 temperature=0,
-                # max_tokens=llm_config["max_tokens"],
-                max_tokens=4096,
+                max_tokens=32768,
             )
             result = response.choices[0].message.content or ""
             if experiment_config.mode == "cot":

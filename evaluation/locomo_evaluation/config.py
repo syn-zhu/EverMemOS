@@ -6,7 +6,6 @@ load_dotenv()
 
 class ExperimentConfig:
     experiment_name: str = "locomo_evaluation"
-    mode: str = "cot"
     datase_path: str = "data/locomo10.json"
     use_emb: bool = True
     use_reranker: bool = True  # 启用 Reranker
@@ -59,7 +58,7 @@ class ExperimentConfig:
             "base_url": "https://openrouter.ai/api/v1",
             "api_key": os.getenv("LLM_API_KEY"),
             "temperature": 0.3,
-            "max_tokens": 16384,
+            "max_tokens": 32768,
         },
         "vllm": {
             "llm_provider": "openai",
