@@ -311,24 +311,51 @@ async def process_single_conversation(
                     # 如果不是预期的类型，使用当前时间
                     memcell.timestamp = get_now_with_timezone()
 
-        # 生成event log（为每个memcell提取event log）
+        # 🔥 优化：并发生成 event log（提升速度 10-20 倍）
         if event_log_extractor:
-            for memcell in memcell_list:
-                if hasattr(memcell, 'episode') and memcell.episode:
-                    try:
-                        event_log = await event_log_extractor.extract_event_log(
-                            episode_text=memcell.episode, timestamp=memcell.timestamp
-                        )
-                        if event_log:
-                            # 将event_log添加到memcell的字典中
-                            memcell.event_log = event_log
-                    except Exception as e:
-                        console = Console()
-                        console.print(
-                            f"\n⚠️  生成event log失败 (Conv {conv_id}): {e}",
-                            style="yellow",
-                        )
-                        # 继续处理，即使event log生成失败
+            # 准备所有需要提取 event log 的 memcells
+            memcells_with_episode = [
+                (idx, memcell) 
+                for idx, memcell in enumerate(memcell_list)
+                if hasattr(memcell, 'episode') and memcell.episode
+            ]
+            
+            # 定义单个 event log 提取任务
+            async def extract_single_event_log(idx: int, memcell):
+                try:
+                    event_log = await event_log_extractor.extract_event_log(
+                        episode_text=memcell.episode, 
+                        timestamp=memcell.timestamp
+                    )
+                    return idx, event_log
+                except Exception as e:
+                    console = Console()
+                    console.print(
+                        f"\n⚠️  生成event log失败 (Conv {conv_id}, Memcell {idx}): {e}",
+                        style="yellow",
+                    )
+                    return idx, None
+            
+            # 🔥 并发提取所有 event logs（使用 Semaphore 控制并发数）
+            sem = asyncio.Semaphore(20)  # 限制并发数为 20（避免 API 限流）
+            
+            async def extract_with_semaphore(idx, memcell):
+                async with sem:
+                    return await extract_single_event_log(idx, memcell)
+            
+            print(f"\n🔥 开始并发提取 {len(memcells_with_episode)} 个 event logs...")
+            event_log_tasks = [
+                extract_with_semaphore(idx, memcell) 
+                for idx, memcell in memcells_with_episode
+            ]
+            event_log_results = await asyncio.gather(*event_log_tasks)
+            
+            # 将 event logs 关联回对应的 memcells
+            for original_idx, event_log in event_log_results:
+                if event_log:
+                    memcell_list[original_idx].event_log = event_log
+            
+            print(f"✅ Event log 提取完成: {sum(1 for _, el in event_log_results if el)}/{len(event_log_results)} 成功")
 
         # 保存单个会话的结果
         memcell_dicts = []
@@ -385,10 +412,40 @@ async def main():
     save_dir = os.path.join(CURRENT_DIR, "results", config.experiment_name, "memcells")
 
     console = Console()
+    
+    # 🔥 断点续传：检查已完成的对话
+    completed_convs = set()
+    for conv_id in raw_data_dict.keys():
+        output_file = os.path.join(save_dir, f"memcell_list_conv_{conv_id}.json")
+        if os.path.exists(output_file):
+            # 验证文件有效性（非空且可解析）
+            try:
+                with open(output_file, "r") as f:
+                    data = json.load(f)
+                    if data and len(data) > 0:  # 确保有数据
+                        completed_convs.add(conv_id)
+                        console.print(f"✅ 跳过已完成的会话: {conv_id} ({len(data)} memcells)", style="green")
+            except Exception as e:
+                console.print(f"⚠️  会话 {conv_id} 文件损坏，将重新处理: {e}", style="yellow")
+    
+    # 过滤出需要处理的对话
+    pending_raw_data_dict = {
+        conv_id: conv_data 
+        for conv_id, conv_data in raw_data_dict.items() 
+        if conv_id not in completed_convs
+    }
+    
     console.print(f"\n📊 总共发现 {len(raw_data_dict)} 个会话", style="bold cyan")
-    total_messages = sum(len(conv) for conv in raw_data_dict.values())
-    console.print(f"📝 总消息数: {total_messages}", style="bold blue")
-    console.print(f"🚀 开始并发处理所有会话...\n", style="bold green")
+    console.print(f"✅ 已完成: {len(completed_convs)} 个", style="bold green")
+    console.print(f"⏳ 待处理: {len(pending_raw_data_dict)} 个", style="bold yellow")
+    
+    if len(pending_raw_data_dict) == 0:
+        console.print(f"\n🎉 所有会话已完成，无需处理！", style="bold green")
+        return
+    
+    total_messages = sum(len(conv) for conv in pending_raw_data_dict.values())
+    console.print(f"📝 待处理消息数: {total_messages}", style="bold blue")
+    console.print(f"🚀 开始并发处理剩余会话...\n", style="bold green")
 
     # 创建共享的 LLM Provider 和 MemCell Extractor 实例（解决连接竞争问题）
     console.print("⚙️ 初始化 LLM Provider...", style="yellow")
@@ -410,8 +467,9 @@ async def main():
     console.print("⚙️ 初始化 Event Log Extractor...", style="yellow")
     shared_event_log_extractor = EventLogExtractor(llm_provider=shared_llm_provider)
 
+    # 🔥 使用待处理的对话字典（断点续传）
     # 创建进度计数器
-    progress_counter = {'total': len(raw_data_dict), 'completed': 0, 'failed': 0}
+    progress_counter = {'total': len(pending_raw_data_dict), 'completed': 0, 'failed': 0}
 
     # 使用 Rich 进度条
     start_time = time.time()
@@ -437,15 +495,24 @@ async def main():
         main_task = progress.add_task(
             "[bold cyan]🎯 总进度",
             total=len(raw_data_dict),
-            completed=0,  # 初始化为0
+            completed=len(completed_convs),  # 🔥 已完成的数量
             status="处理中",
         )
 
-        # 为每个会话创建独立的进度条任务
+        # 🔥 先添加已完成的会话到进度条（显示为已完成）
         conversation_tasks = {}
-        updated_tasks = []
+        for conv_id in completed_convs:
+            conv_task_id = progress.add_task(
+                f"[green]Conv-{conv_id}",
+                total=len(raw_data_dict[conv_id]),
+                completed=len(raw_data_dict[conv_id]),  # 100%
+                status="✅ (已跳过)",
+            )
+            conversation_tasks[conv_id] = conv_task_id
 
-        for conv_id, conversation in raw_data_dict.items():
+        # 🔥 为待处理的会话创建进度条任务
+        updated_tasks = []
+        for conv_id, conversation in pending_raw_data_dict.items():
             # 创建每个会话的进度条
             conv_task_id = progress.add_task(
                 f"[yellow]Conv-{conv_id}",  # 简化名称
@@ -479,13 +546,16 @@ async def main():
             progress.update(main_task, advance=1)
             return result
 
-        # 并发执行所有任务
-        results = await asyncio.gather(
-            *[
-                run_with_completion(task, conv_id)
-                for (conv_id, _), task in zip(raw_data_dict.items(), updated_tasks)
-            ]
-        )
+        # 🔥 并发执行所有待处理的任务
+        if updated_tasks:
+            results = await asyncio.gather(
+                *[
+                    run_with_completion(task, conv_id)
+                    for (conv_id, _), task in zip(pending_raw_data_dict.items(), updated_tasks)
+                ]
+            )
+        else:
+            results = []
         # with open(os.path.join(save_dir, "response_info.json"), "w") as f:
         #     json.dump(shared_llm_provider.provider.response_info, f, ensure_ascii=False, indent=2)
         # 更新主进度为完成
