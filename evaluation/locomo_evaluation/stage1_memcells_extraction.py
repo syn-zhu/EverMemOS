@@ -17,45 +17,33 @@ from rich.progress import (
 )
 from rich.console import Console
 
-# Ensure project root is on sys.path so `src` can be imported when running directly
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-SRC_DIR = os.path.join(PROJECT_ROOT, "src")
-SRC_DEV_DIR = os.path.join(PROJECT_ROOT, "src_dev")
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-if SRC_DEV_DIR not in sys.path:
-    sys.path.insert(0, SRC_DEV_DIR)
 
-
-from src.common_utils.datetime_utils import (
+from common_utils.datetime_utils import (
     to_iso_format,
     from_iso_format,
     from_timestamp,
     get_now_with_timezone,
 )
-from src.memory_layer.llm.llm_provider import LLMProvider
-from src.memory_layer.memcell_extractor.base_memcell_extractor import RawData, MemCell
-from src.memory_layer.memcell_extractor.conv_memcell_extractor import (
+from memory_layer.llm.llm_provider import LLMProvider
+from memory_layer.memcell_extractor.base_memcell_extractor import RawData, MemCell
+from memory_layer.memcell_extractor.conv_memcell_extractor import (
     ConvMemCellExtractor,
     ConversationMemCellExtractRequest,
 )
-from src.memory_layer.memory_extractor.episode_memory_extractor import (
+from memory_layer.memory_extractor.episode_memory_extractor import (
     EpisodeMemoryExtractRequest,
     EpisodeMemoryExtractor,
 )
-from src.memory_layer.memory_extractor.event_log_extractor import EventLogExtractor
-from src.memory_layer.types import RawDataType
+from memory_layer.memory_extractor.event_log_extractor import EventLogExtractor
+from memory_layer.types import RawDataType
 
 # 新增：聚类和 Profile 管理组件
-from src.memory_layer.cluster_manager import (
+from memory_layer.cluster_manager import (
     ClusterManager,
     ClusterManagerConfig,
     InMemoryClusterStorage,
 )
-from src.memory_layer.profile_manager import (
+from memory_layer.profile_manager import (
     ProfileManager,
     ProfileManagerConfig,
     ScenarioType,
@@ -80,7 +68,6 @@ def raw_data_load(locomo_data_path: str) -> Dict[str, List[RawData]]:
 
     # data = [data[2]]
     # data = [data[0], data[1], data[2]]
-    data = [data[0]]
     raw_data_dict = {}
 
     conversations = [data[i]['conversation'] for i in range(len(data))]
@@ -145,7 +132,7 @@ def raw_data_load(locomo_data_path: str) -> Dict[str, List[RawData]]:
                         if optional_field in msg:
                             message[optional_field] = msg[optional_field]
                     messages.append(message)
-            messages = messages[:100]
+            # messages = messages[:100]
         raw_data_dict[str(con_id)] = messages
 
         print(

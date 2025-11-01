@@ -14,26 +14,17 @@ from nltk.tokenize import word_tokenize
 import asyncio
 from tqdm import tqdm
 
-# Ensure project root is on sys.path so `evaluation` can be imported when running directly
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-SRC_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "src"))
-sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, SRC_DIR)
+
 
 from evaluation.locomo_evaluation.config import ExperimentConfig
 
 # from evaluation.locomo_evaluation.tools.embedding_provider import EmbeddingProvider
 # from evaluation.locomo_evaluation.tools.reranker_provider import RerankerProvider
-from src.agentic_layer import vectorize_service
-from src.agentic_layer import rerank_service
+from agentic_layer import vectorize_service
+from agentic_layer import rerank_service
 
-# 🔥 Agentic Retrieval 工具
-try:
-    from evaluation.locomo_evaluation.tools import agentic_utils
-except ImportError:
-    print("Warning: agentic_utils not found, agentic retrieval disabled")
-    agentic_utils = None
+from evaluation.locomo_evaluation.tools import agentic_utils
+
 
 # This file depends on the rank_bm25 library.
 # If you haven't installed it yet, run: pip install rank_bm25

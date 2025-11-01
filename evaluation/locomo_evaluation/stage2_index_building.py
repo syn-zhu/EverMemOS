@@ -11,17 +11,11 @@ from nltk.tokenize import word_tokenize
 from rank_bm25 import BM25Okapi
 import asyncio
 
-# Ensure project root is on sys.path so `evaluation` can be imported when running directly
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-SRC_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "src"))
-sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, SRC_DIR)
+
 
 
 from evaluation.locomo_evaluation.config import ExperimentConfig
-from evaluation.locomo_evaluation.tools.embedding_provider import EmbeddingProvider
-from src.agentic_layer import vectorize_service
+from agentic_layer import vectorize_service
 
 
 def ensure_nltk_data():

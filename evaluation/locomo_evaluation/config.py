@@ -14,9 +14,9 @@ class ExperimentConfig:
     num_conv: int = 10
     
     # 🔥 新增：MemCell 提取功能开关
-    enable_semantic_extraction: bool = True  # 是否启用语义记忆提取
+    enable_semantic_extraction: bool = False  # 是否启用语义记忆提取
     enable_clustering: bool = True            # 是否启用聚类
-    enable_profile_extraction: bool = True    # 是否启用 Profile 提取
+    enable_profile_extraction: bool = False    # 是否启用 Profile 提取
     
     # 🔥 聚类配置
     cluster_similarity_threshold: float = 0.65  # 聚类相似度阈值
@@ -63,8 +63,7 @@ class ExperimentConfig:
     "Determine if the passage contains specific facts, entities (names, dates, locations), "
     "or details that directly answer the question.")
     
-    llm_service: str = "openai"  # openai, gemini, vllm
-    # experiment_name: str = "locomo_evaluation_nemori"
+    llm_service: str = "openai"  # openai, vllm
     llm_config: dict = {
         "openai": {
             "llm_provider": "openai",
@@ -80,7 +79,7 @@ class ExperimentConfig:
             "base_url": "http://0.0.0.0:8000/v1",
             "api_key": "123",
             "temperature": 0,
-            "max_tokens": 20000,
+            "max_tokens": 32768,
         },
     }
     max_retries: int = 5
