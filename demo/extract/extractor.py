@@ -12,8 +12,8 @@ from memory_layer.types import RawDataType
 from memory_layer.memcell_extractor.base_memcell_extractor import RawData
 from common_utils.datetime_utils import from_iso_format
 
-from demo.memory_config import ExtractModeConfig, MongoDBConfig
-from demo.memory_utils import ensure_mongo_beanie_ready
+from demo.config import ExtractModeConfig, MongoDBConfig
+from demo.utils import ensure_mongo_beanie_ready
 
 
 class MemoryExtractor:
