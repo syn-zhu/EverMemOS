@@ -442,18 +442,19 @@ Memory Manager (memory_manager.py)
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 |-----|------|------|--------|------|
 | user_id | string | 是 | - | 用户ID |
-| memory_type | string | 否 | "multiple" | 记忆类型，可选值：`base_memory`、`profile`、`preference`、`episode_memory`、`multiple` |
-| limit | integer | 否 | 40 | 返回记忆的最大数量 |
+| memory_type | string | 否 | "profile" | 记忆类型，可选值：`profile`、`episode_memory`、`foresight`、`event_log` |
+| limit | integer | 否 | 10 | 返回记忆的最大数量 |
 | offset | integer | 否 | 0 | 分页偏移量 |
 | sort_by | string | 否 | - | 排序字段 |
 | sort_order | string | 否 | "desc" | 排序方向，可选值：`asc`、`desc` |
+| filters | object | 否 | {} | 额外的过滤条件 |
+| version_range | array | 否 | - | 版本范围过滤，格式为 [start, end]，闭区间 |
 
 **记忆类型说明**：
-- `base_memory`: 基础记忆，用户的基本信息和常用数据
 - `profile`: 用户画像，包含用户的特征和属性
-- `preference`: 用户偏好，包含用户的喜好和设置
 - `episode_memory`: 情景记忆摘要
-- `multiple`: 多类型（默认），包含 base_memory、profile、preference
+- `foresight`: 前瞻性记忆，包含用户的意图和计划
+- `event_log`: 事件日志，记录用户的行为事件
 
 #### 响应格式
 
@@ -547,15 +548,15 @@ asyncio.run(fetch_memories())
 ```json
 {
   "user_id": "user_123",
+  "group_id": "group_456",
   "query": "咖啡偏好",
   "retrieve_method": "keyword",
   "top_k": 10,
   "start_time": "2024-01-01T00:00:00",
   "end_time": "2024-12-31T23:59:59",
   "memory_types": ["episode_memory"],
-  "filters": {
-    "group_id": "group_456"
-  }
+  "filters": {},
+  "include_metadata": true
 }
 ```
 
@@ -563,15 +564,17 @@ asyncio.run(fetch_memories())
 
 | 字段 | 类型 | 必需 | 默认值 | 说明 |
 |-----|------|------|--------|------|
-| user_id | string | 是 | - | 用户ID |
+| user_id | string | 否 | - | 用户ID（user_id 和 group_id 至少提供一个） |
+| group_id | string | 否 | - | 群组ID（user_id 和 group_id 至少提供一个） |
 | query | string | 否 | - | 查询文本 |
 | retrieve_method | string | 否 | "keyword" | 检索方法，可选值：`keyword`、`vector`、`hybrid` |
-| top_k | integer | 否 | 40 | 返回的最大结果数 |
+| top_k | integer | 否 | 10 | 返回的最大结果数 |
 | start_time | string | 否 | - | 时间范围起点（ISO 8601格式） |
 | end_time | string | 否 | - | 时间范围终点（ISO 8601格式） |
-| memory_types | array | 否 | [] | 要检索的记忆类型列表 |
+| memory_types | array | 否 | ["episode_memory"] | 要检索的记忆类型列表，可选值：`episode_memory`、`foresight`、`event_log`（不支持 `profile`） |
 | filters | object | 否 | {} | 额外的过滤条件 |
-| radius | float | 否 | 0.6 | 向量检索时的相似度阈值（仅对 vector 和 hybrid 方法有效） |
+| radius | float | 否 | - | 向量检索时的 COSINE 相似度阈值（仅对 vector 和 hybrid 方法有效，默认 0.6） |
+| include_metadata | boolean | 否 | true | 是否包含元数据 |
 
 **检索方法说明**：
 - `keyword`: 基于关键词的 BM25 检索，适合精确匹配，速度快（默认方法）
@@ -684,7 +687,10 @@ asyncio.run(search_memories())
 {
   "version": "1.0",
   "scene": "group_chat",
-  "scene_desc": "项目团队讨论",
+  "scene_desc": {
+    "bot_ids": ["bot_001"],
+    "type": "project_discussion"
+  },
   "name": "项目讨论组",
   "description": "新功能开发的技术讨论",
   "group_id": "group_123",
@@ -712,13 +718,13 @@ asyncio.run(search_memories())
 |-----|------|------|------|
 | version | string | 是 | 元数据版本 |
 | scene | string | 是 | 场景标识（如 "group_chat"） |
-| scene_desc | string | 是 | 场景描述 |
+| scene_desc | object | 是 | 场景描述对象，可包含 bot_ids 等字段 |
 | name | string | 是 | 对话名称 |
-| description | string | 是 | 对话描述 |
+| description | string | 否 | 对话描述 |
 | group_id | string | 是 | 群组唯一标识 |
 | created_at | string | 是 | 对话创建时间（ISO 8601 格式） |
-| default_timezone | string | 是 | 默认时区 |
-| user_details | object | 是 | 参与者详情 |
+| default_timezone | string | 否 | 默认时区（默认使用系统时区） |
+| user_details | object | 否 | 参与者详情，key 为用户ID，value 为用户详情对象 |
 | tags | array | 否 | 标签列表 |
 
 #### 响应格式

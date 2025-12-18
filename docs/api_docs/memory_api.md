@@ -442,18 +442,19 @@ Retrieve user's core memory data through KV method.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | user_id | string | Yes | - | User ID |
-| memory_type | string | No | "multiple" | Memory type, options: `base_memory`, `profile`, `preference`, `episode_memory`, `multiple` |
-| limit | integer | No | 40 | Maximum number of memories to return |
+| memory_type | string | No | "profile" | Memory type, options: `profile`, `episode_memory`, `foresight`, `event_log` |
+| limit | integer | No | 10 | Maximum number of memories to return |
 | offset | integer | No | 0 | Pagination offset |
 | sort_by | string | No | - | Sort field |
 | sort_order | string | No | "desc" | Sort direction, options: `asc`, `desc` |
+| filters | object | No | {} | Additional filter conditions |
+| version_range | array | No | - | Version range filter, format: [start, end], closed interval |
 
 **Memory Type Descriptions**:
-- `base_memory`: Base memory, user's basic information and common data
 - `profile`: User profile, containing user's characteristics and attributes
-- `preference`: User preferences, containing user's likes and settings
 - `episode_memory`: Episodic memory summary
-- `multiple`: Multiple types (default), includes base_memory, profile, preference
+- `foresight`: Foresight memory, containing user's intentions and plans
+- `event_log`: Event log, recording user's behavioral events
 
 #### Response Format
 
@@ -547,15 +548,15 @@ Retrieve relevant memories based on query text using keyword, vector, or hybrid 
 ```json
 {
   "user_id": "user_123",
+  "group_id": "group_456",
   "query": "coffee preference",
   "retrieve_method": "keyword",
   "top_k": 10,
   "start_time": "2024-01-01T00:00:00",
   "end_time": "2024-12-31T23:59:59",
   "memory_types": ["episode_memory"],
-  "filters": {
-    "group_id": "group_456"
-  }
+  "filters": {},
+  "include_metadata": true
 }
 ```
 
@@ -563,15 +564,17 @@ Retrieve relevant memories based on query text using keyword, vector, or hybrid 
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| user_id | string | Yes | - | User ID |
+| user_id | string | No | - | User ID (at least one of user_id or group_id is required) |
+| group_id | string | No | - | Group ID (at least one of user_id or group_id is required) |
 | query | string | No | - | Query text |
 | retrieve_method | string | No | "keyword" | Retrieval method, options: `keyword`, `vector`, `hybrid` |
-| top_k | integer | No | 40 | Maximum number of results to return |
+| top_k | integer | No | 10 | Maximum number of results to return |
 | start_time | string | No | - | Time range start (ISO 8601 format) |
 | end_time | string | No | - | Time range end (ISO 8601 format) |
-| memory_types | array | No | [] | List of memory types to retrieve |
+| memory_types | array | No | ["episode_memory"] | List of memory types to retrieve, options: `episode_memory`, `foresight`, `event_log` (`profile` not supported) |
 | filters | object | No | {} | Additional filter conditions |
-| radius | float | No | 0.6 | Similarity threshold for vector retrieval (only for vector and hybrid methods) |
+| radius | float | No | - | COSINE similarity threshold for vector retrieval (only for vector and hybrid methods, default 0.6) |
+| include_metadata | boolean | No | true | Whether to include metadata |
 
 **Retrieval Method Descriptions**:
 - `keyword`: BM25 keyword-based retrieval, suitable for exact matching, fast (default)
@@ -684,7 +687,10 @@ Save conversation metadata, including scene, participants, tags, etc.
 {
   "version": "1.0",
   "scene": "group_chat",
-  "scene_desc": "Project team discussion",
+  "scene_desc": {
+    "bot_ids": ["bot_001"],
+    "type": "project_discussion"
+  },
   "name": "Project Discussion Group",
   "description": "Technical discussion for new feature development",
   "group_id": "group_123",
@@ -712,13 +718,13 @@ Save conversation metadata, including scene, participants, tags, etc.
 |-------|------|----------|-------------|
 | version | string | Yes | Metadata version |
 | scene | string | Yes | Scene identifier (e.g., "group_chat") |
-| scene_desc | string | Yes | Scene description |
+| scene_desc | object | Yes | Scene description object, can contain fields like bot_ids |
 | name | string | Yes | Conversation name |
-| description | string | Yes | Conversation description |
+| description | string | No | Conversation description |
 | group_id | string | Yes | Unique group identifier |
 | created_at | string | Yes | Conversation creation time (ISO 8601 format) |
-| default_timezone | string | Yes | Default timezone |
-| user_details | object | Yes | Participant details |
+| default_timezone | string | No | Default timezone (defaults to system timezone) |
+| user_details | object | No | Participant details, key is user ID, value is user detail object |
 | tags | array | No | Tag list |
 
 #### Response Format
