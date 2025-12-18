@@ -35,8 +35,6 @@ from core.di.utils import (
     register_prototype,
     register_primary,
     register_mock,
-    contains_bean,
-    contains_bean_by_type,
     enable_mock_mode,
     disable_mock_mode,
     is_mock_mode,
@@ -83,8 +81,6 @@ __all__ = [
     'register_primary',
     'register_mock',
     # Container checks
-    'contains_bean',
-    'contains_bean_by_type',
     # Mock mode
     'enable_mock_mode',
     'disable_mock_mode',

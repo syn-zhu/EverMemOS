@@ -36,6 +36,7 @@ from infra_layer.adapters.out.persistence.repository.conversation_meta_raw_repos
     ConversationMetaRawRepository,
 )
 from core.request.timeout_background import timeout_to_background
+from core.request import log_request
 from core.component.redis_provider import RedisProvider
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,7 @@ class MemoryController(BaseController):
             },
         },
     )
+    @log_request()
     @timeout_to_background()
     async def memorize_single_message(
         self, fastapi_request: FastAPIRequest

@@ -178,32 +178,6 @@ def register_mock(bean_type: Type[T], instance: T = None, name: str = None) -> N
     register_bean(bean_type, instance, name, BeanScope.SINGLETON, is_mock=True)
 
 
-def contains_bean(name: str) -> bool:
-    """
-    Check if Bean with specified name exists
-
-    Args:
-        name: Bean name
-
-    Returns:
-        Whether Bean exists
-    """
-    return get_container().contains_bean(name)
-
-
-def contains_bean_by_type(bean_type: Type) -> bool:
-    """
-    Check if Bean with specified type exists
-
-    Args:
-        bean_type: Bean type
-
-    Returns:
-        Whether Bean exists
-    """
-    return get_container().contains_bean_by_type(bean_type)
-
-
 def enable_mock_mode() -> None:
     """Enable mock mode"""
     get_container().enable_mock_mode()

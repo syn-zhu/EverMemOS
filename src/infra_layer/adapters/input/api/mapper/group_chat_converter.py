@@ -10,13 +10,15 @@ It is forbidden to add format conversion logic in other modules (such as control
 Main functions:
 1. Format validation: validate_group_chat_format_input() - Validates whether input data conforms to GroupChatFormat specifications
 2. Format conversion: convert_group_chat_format_to_memorize_input() - Converts GroupChatFormat to internal format
-3. Message conversion: _convert_message_to_internal_format() - Converts a single message
-4. Time handling: _parse_datetime_with_timezone() - Handles time strings with timezone
+3. Simple message conversion: convert_simple_message_to_memorize_input() - Converts V1 simple message format
+4. Field extraction: extract_message_core_fields() - Extracts core message fields from request body (for logging/storage)
+5. Utility: normalize_refer_list() - Normalizes refer_list format to string list
 
 Usage example:
     from infra_layer.adapters.input.api.mapper.group_chat_converter import (
         validate_group_chat_format_input,
-        convert_group_chat_format_to_memorize_input
+        convert_group_chat_format_to_memorize_input,
+        extract_message_core_fields,
     )
 
     # Validate format
@@ -24,6 +26,9 @@ Usage example:
         # Convert to internal format
         memorize_input = convert_group_chat_format_to_memorize_input(data)
         # Use memorize_input to call memory storage service
+
+    # Extract core fields for logging
+    core_fields = extract_message_core_fields(request_body)
 """
 
 from typing import Dict, Any, List, Optional
@@ -157,20 +162,8 @@ def _convert_message_to_internal_format(
         user_detail = user_details.get(sender_id, {})
         sender_name = user_detail.get("full_name", sender_id)
 
-    # Convert refer_list format
-    # GroupChatFormat supports two formats: string list or MessageReference object list
-    # Needs to be converted to string list (message_id)
-    converted_refer_list = []
-    if refer_list:
-        for refer in refer_list:
-            if isinstance(refer, str):
-                # Already a message_id string
-                converted_refer_list.append(refer)
-            elif isinstance(refer, dict):
-                # MessageReference object, extract message_id
-                ref_msg_id = refer.get("message_id")
-                if ref_msg_id:
-                    converted_refer_list.append(ref_msg_id)
+    # Convert refer_list format using the public normalize function
+    converted_refer_list = normalize_refer_list(refer_list) if refer_list else []
 
     # Parse time (use default timezone if no timezone info)
     parsed_create_time = _parse_datetime_with_timezone(create_time, default_timezone)
@@ -276,13 +269,15 @@ def convert_simple_message_to_memorize_input(
         raise ValueError("Missing required field: content")
 
     # Build internal format
+    # Note: V1 simple format refer_list is typically already string list,
+    # but we still normalize it for consistency
     internal_message = {
         "_id": message_id,
         "fullName": sender_name,
         "receiverId": None,
         "roomId": group_id,
         "userIdList": [],
-        "referList": refer_list if isinstance(refer_list, list) else [],
+        "referList": normalize_refer_list(refer_list) if refer_list else [],
         "content": content,
         "createTime": create_time,
         "createBy": sender,
@@ -305,6 +300,115 @@ def convert_simple_message_to_memorize_input(
         result["group_name"] = group_name
     if create_time:
         result["current_time"] = create_time
+
+    return result
+
+
+def normalize_refer_list(refer_list: List[Any]) -> List[str]:
+    """
+    Normalize refer_list format to a list of message IDs
+
+    GroupChatFormat supports two formats:
+    1. String list: ["msg_id_1", "msg_id_2"]
+    2. MessageReference object list: [{"message_id": "msg_id_1", ...}, ...]
+
+    Args:
+        refer_list: Original reference list
+
+    Returns:
+        List[str]: Normalized list of message IDs
+    """
+    normalized: List[str] = []
+    for refer in refer_list:
+        if isinstance(refer, str):
+            normalized.append(refer)
+        elif isinstance(refer, dict):
+            ref_msg_id = refer.get("message_id")
+            if ref_msg_id:
+                normalized.append(str(ref_msg_id))
+    return normalized
+
+
+def extract_message_core_fields(body_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Extract core message fields from memorize request body
+
+    This function extracts the essential message fields from different request formats,
+    providing a unified interface for downstream consumers (e.g., MemoryRequestLog storage).
+
+    Supports two formats:
+    1. V1 simple message format: message_id, create_time, sender, sender_name, content, refer_list
+    2. GroupChatFormat: extracts from conversation_list (first message)
+
+    Args:
+        body_data: Parsed request body dictionary
+
+    Returns:
+        Dict[str, Any]: Dictionary containing core message fields:
+            - message_id: Message ID
+            - message_create_time: Message creation time (ISO format string)
+            - sender: Sender user ID
+            - sender_name: Sender display name
+            - content: Message content
+            - group_name: Group name
+            - refer_list: Normalized list of referenced message IDs
+    """
+    result: Dict[str, Any] = {
+        "message_id": None,
+        "message_create_time": None,
+        "sender": None,
+        "sender_name": None,
+        "content": None,
+        "group_name": None,
+        "refer_list": None,
+    }
+
+    if not body_data:
+        return result
+
+    # Try to extract group_name from top level
+    result["group_name"] = body_data.get("group_name")
+
+    # Check if it's GroupChatFormat (has conversation_list)
+    conversation_list = body_data.get("conversation_list")
+    if conversation_list and isinstance(conversation_list, list) and len(conversation_list) > 0:
+        # GroupChatFormat: extract from the first message in conversation_list
+        # Note: If all messages need to be saved, caller should iterate and call this for each
+        first_msg = conversation_list[0]
+        result["message_id"] = first_msg.get("message_id")
+        result["message_create_time"] = first_msg.get("create_time")
+        result["sender"] = first_msg.get("sender")
+        result["sender_name"] = first_msg.get("sender_name")
+        result["content"] = first_msg.get("content")
+
+        # Extract and normalize refer_list
+        refer_list = first_msg.get("refer_list", [])
+        if refer_list:
+            result["refer_list"] = normalize_refer_list(refer_list)
+
+        # Try to get group_name from conversation_meta if not set
+        conversation_meta = body_data.get("conversation_meta", {})
+        if not result["group_name"]:
+            result["group_name"] = conversation_meta.get("name")
+
+        # If sender_name is missing, try to get from user_details
+        if not result["sender_name"] and result["sender"]:
+            user_details = conversation_meta.get("user_details", {})
+            user_detail = user_details.get(result["sender"], {})
+            result["sender_name"] = user_detail.get("full_name")
+
+    else:
+        # V1 simple message format: extract from top level
+        result["message_id"] = body_data.get("message_id")
+        result["message_create_time"] = body_data.get("create_time")
+        result["sender"] = body_data.get("sender")
+        result["sender_name"] = body_data.get("sender_name") or body_data.get("sender")
+        result["content"] = body_data.get("content")
+
+        # Extract and normalize refer_list
+        refer_list = body_data.get("refer_list", [])
+        if refer_list:
+            result["refer_list"] = normalize_refer_list(refer_list)
 
     return result
 
