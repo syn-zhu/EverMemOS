@@ -19,6 +19,11 @@ from memory_layer.memory_extractor.profile_memory_extractor import (
     ProfileMemoryExtractor,
     ProfileMemoryExtractRequest,
 )
+from memory_layer.memory_extractor.profile_memory_v2 import (
+    ProfileMemoryV2Extractor,
+    ProfileMemoryV2ExtractRequest,
+    ProfileMemoryV2,
+)
 from memory_layer.profile_manager.config import ProfileManagerConfig, ScenarioType
 from core.observation.logger import get_logger
 
@@ -74,7 +79,7 @@ class ProfileManager:
         
         # Initialize profile extractor
         self._profile_extractor = ProfileMemoryExtractor(llm_provider=llm_provider)
-        
+        self._profile_extractor_v2 = ProfileMemoryV2Extractor(llm_provider=llm_provider)
         # Statistics
         self._stats = {
             "total_extractions": 0,
@@ -164,3 +169,154 @@ class ProfileManager:
     def get_stats(self) -> Dict[str, Any]:
         """Get extraction statistics."""
         return dict(self._stats)
+    
+    def _memcell_to_episode(self, memcell: Any) -> Dict[str, Any]:
+        """Convert MemCell to episode dict for LLM.
+        
+        Supports both MemCell objects and dict representations.
+        
+        Returns:
+            Episode dict with id, created_at, summary, original_data
+        """
+        if isinstance(memcell, dict):
+            # Dict format (from JSON)
+            event_id = str(memcell.get("event_id", "") or memcell.get("id", ""))
+            created_at = memcell.get("timestamp") or memcell.get("created_at")
+            summary = memcell.get("summary", "")
+            original_data = memcell.get("original_data", [])
+        else:
+            # MemCell object
+            event_id = str(memcell.event_id) if hasattr(memcell, 'event_id') and memcell.event_id else ""
+            created_at = memcell.timestamp if hasattr(memcell, 'timestamp') else None
+            summary = memcell.summary if hasattr(memcell, 'summary') else ""
+            original_data = memcell.original_data if hasattr(memcell, 'original_data') else []
+        
+        return {
+            "id": event_id,
+            "created_at": created_at,
+            "summary": summary,
+            "original_data": original_data,
+        }
+    
+    # =========================================================================
+    # V2 Profile Extraction - Explicit info + Implicit traits
+    # =========================================================================
+    
+    async def extract_profiles_v2(
+        self,
+        memcells: List[Any],
+        old_profiles: Optional[List[Any]] = None,
+        user_id_list: Optional[List[str]] = None,
+        group_id: Optional[str] = None,
+        max_items: int = 25,
+    ) -> List[ProfileMemoryV2]:
+        """V2 Profile Extraction - Explicit Information + Implicit Traits (batch multi-user).
+
+        The LLM will see 3 types of information:
+        1. old_profile - Current user profile (each entry contains evidence + sources)
+        2. cluster_memcells - MemCells from the same cluster (for context reference)
+        3. new_memcell - The latest MemCell (last in the list)
+
+        Note: Referenced_episodes are not needed, since each evidence in the profile already explains "why it exists."
+
+        Note: This method only works in the ASSISTANT scenario.
+
+        Args:
+            memcells: List of MemCells (last one is new_memcell, others are cluster context)
+            old_profiles: List of existing profiles (for incremental updates)
+            user_id_list: List of user IDs to extract profiles for
+            group_id: Group ID (optional)
+            max_items: Maximum number of profile items
+
+        Returns:
+            List of ProfileMemoryV2 objects; empty list if not in ASSISTANT scenario
+        """
+
+        self._stats["total_extractions"] += 1
+        # V2 Profile only works in ASSISTANT scenario
+        if self.config.scenario != ScenarioType.ASSISTANT:
+            logger.error(
+                f"extract_profiles_v2 only works in ASSISTANT scenario, "
+                f"current scenario: {self.config.scenario.value}"
+            )
+            return []
+        
+        if not memcells:
+            logger.error("No memcells provided for V2 profile extraction")
+            return []
+        
+        if not user_id_list:
+            logger.error("No user_id_list provided for V2 profile extraction")
+            return []
+        
+        # Last memcell is new_memcell, others are cluster context
+        new_memcell = memcells[-1]
+        cluster_memcells = memcells[:-1] if len(memcells) > 1 else []
+        
+        # Convert memcells to episode dicts for LLM
+        new_episode = self._memcell_to_episode(new_memcell)
+        cluster_episodes = [
+            self._memcell_to_episode(mc) 
+            for mc in cluster_memcells
+        ]
+        
+        # Convert old_profiles list to dict by user_id
+        old_profiles_dict: Dict[str, ProfileMemoryV2] = {}
+        logger.info(f"[V2Profile] Processing {len(old_profiles or [])} old profiles")
+        for p in (old_profiles or []):
+            uid = p.get("user_id") if isinstance(p, dict) else getattr(p, "user_id", None)
+            p_dict = p if isinstance(p, dict) else p.to_dict()
+            has_explicit = "explicit_info" in p_dict
+            logger.info(f"[V2Profile] Old profile: user_id={uid}, has_explicit_info={has_explicit}, keys={list(p_dict.keys())[:5]}")
+            if uid and has_explicit:
+                old_profiles_dict[uid] = ProfileMemoryV2.from_dict(p_dict)
+                logger.info(f"[V2Profile] Loaded profile for {uid}: {old_profiles_dict[uid].total_items()} items")
+        
+        results: List[ProfileMemoryV2] = []
+        logger.info(f"[V2Profile] user_id_list={user_id_list}, old_profiles_dict keys={list(old_profiles_dict.keys())}")
+        
+        # Extract for each user
+        for user_id in user_id_list:
+            old_profile = old_profiles_dict.get(user_id)
+            logger.info(f"[V2Profile] Looking for user_id={user_id}, found={old_profile is not None}")
+            
+            # Build request
+            request = ProfileMemoryV2ExtractRequest(
+                new_episode=new_episode,
+                cluster_episodes=cluster_episodes,
+                old_profile=old_profile,
+                user_id=user_id,
+                group_id=group_id or self.group_id,
+                max_items=max_items,
+            )
+            
+            # Extract with retry
+            for attempt in range(self.config.max_retries):
+                try:
+                    logger.info(f"Extracting V2 profile for user {user_id} (attempt {attempt + 1})...")
+                    
+                    result = await self._profile_extractor_v2.extract_memory(request)
+                    
+                    if result:
+                        self._stats["successful_extractions"] += 1
+                        logger.info(
+                            f"V2 profile extracted for {user_id}: {result.total_items()} items "
+                            f"(explicit: {len(result.explicit_info)}, implicit: {len(result.implicit_traits)})"
+                        )
+                        results.append(result)
+                    else:
+                        logger.warning(f"V2 profile extraction returned None for {user_id}")
+                        if old_profile:
+                            results.append(old_profile)
+                    break
+                    
+                except Exception as e:
+                    logger.warning(f"V2 profile extraction attempt {attempt + 1} for {user_id} failed: {e}")
+                    if attempt < self.config.max_retries - 1:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                    else:
+                        logger.error(f"All V2 profile extraction attempts failed for {user_id}")
+                        if old_profile:
+                            results.append(old_profile)
+        
+        return results

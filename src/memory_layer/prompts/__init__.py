@@ -92,6 +92,19 @@ _PROMPT_REGISTRY = {
         "en": ("memory_layer.prompts.en.event_log_prompts", False),
         "zh": ("memory_layer.prompts.zh.event_log_prompts", False),
     },
+    # Profile V2 (Explicit information + Implicit traits)
+    "PROFILE_V2_UPDATE_PROMPT": {
+        "en": ("memory_layer.prompts.en.profile_mem_v2_prompts", False),
+        "zh": ("memory_layer.prompts.zh.profile_mem_v2_prompts", False),
+    },
+    "PROFILE_V2_COMPACT_PROMPT": {
+        "en": ("memory_layer.prompts.en.profile_mem_v2_prompts", False),
+        "zh": ("memory_layer.prompts.zh.profile_mem_v2_prompts", False),
+    },
+    "PROFILE_V2_INITIAL_EXTRACTION_PROMPT": {
+        "en": ("memory_layer.prompts.en.profile_mem_v2_prompts", False),
+        "zh": ("memory_layer.prompts.zh.profile_mem_v2_prompts", False),
+    },
 }
 
 

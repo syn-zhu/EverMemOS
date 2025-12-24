@@ -86,24 +86,6 @@ class MemoryDocPayload:
     doc: Any
 
 
-def _clone_event_log(raw_event_log: Any) -> Optional[EventLog]:
-    """Convert any structured event log into an EventLog instance"""
-    if raw_event_log is None:
-        return None
-
-    if isinstance(raw_event_log, EventLog):
-        return EventLog(
-            time=getattr(raw_event_log, "time", ""),
-            atomic_fact=list(getattr(raw_event_log, "atomic_fact", []) or []),
-            fact_embeddings=getattr(raw_event_log, "fact_embeddings", None),
-        )
-
-    if isinstance(raw_event_log, dict):
-        return EventLog.from_dict(raw_event_log)
-
-    return None
-
-
 from biz_layer.memorize_config import MemorizeConfig, DEFAULT_MEMORIZE_CONFIG
 
 
@@ -268,7 +250,8 @@ async def _trigger_profile_extraction(
         )
 
         # Get Profile storage
-        profile_storage = get_bean_by_type(UserProfileRawRepository)
+        profile_repo = get_bean_by_type(UserProfileRawRepository)
+        memcell_repo = get_bean_by_type(MemCellRawRepository)
 
         # Create LLM Provider
         llm_provider = LLMProvider(
@@ -307,85 +290,97 @@ async def _trigger_profile_extraction(
             for u in (memcell.participants or [])
             if "robot" not in u.lower() and "assistant" not in u.lower()
         ]
+        # ===== Common preprocessing: fetch all cluster memcells =====
+        current_event_id = str(memcell.event_id) if memcell.event_id else cluster_id
+        cluster_event_ids = set()
+        if cluster_state and hasattr(cluster_state, 'eventid_to_cluster'):
+            for event_id, cid in cluster_state.eventid_to_cluster.items():
+                if cid == cluster_id and event_id != current_event_id:
+                    cluster_event_ids.add(event_id)
+        
+        # Fetch cluster memcells + current memcell
+        all_memcells = []
+        if cluster_event_ids:
+            try:
+                cluster_memcells_dict = await memcell_repo.get_by_event_ids(list(cluster_event_ids))
+                all_memcells = list(cluster_memcells_dict.values())
+            except Exception as e:
+                logger.warning(f"[Profile] Failed to fetch cluster memcells: {e}")
+        
+        # Append current memcell as the last one (new_memcell)
+        all_memcells.append(memcell)
+        logger.info(f"[Profile] Context: cluster={len(all_memcells) - 1}, new=1, users={len(user_id_list)}")
 
-        # Load existing profiles
-        old_profiles_dict = await profile_storage.get_all_profiles()
+        # ===== Extract and save profiles =====
+
+        # Load old profiles (same for V1 and V2)
+        old_profiles_dict = await profile_repo.get_all_profiles(group_id=group_id)
         old_profiles = list(old_profiles_dict.values()) if old_profiles_dict else []
+        logger.info(f"[Profile] Loaded {len(old_profiles)} existing profiles for group={group_id}")
+        if old_profiles:
+            for uid, p in old_profiles_dict.items():
+                keys = list(p.keys()) if isinstance(p, dict) else dir(p)
+                logger.info(f"[Profile] Profile for {uid}: keys={keys[:8]}")
 
-        # Perform Profile extraction (pass MemCell objects directly, not dictionaries)
-        new_profiles = await profile_manager.extract_profiles(
-            memcells=[memcell],  # Pass MemCell object
-            old_profiles=old_profiles,
-            user_id_list=user_id_list,
-        )
+        # Extract profiles
+        if profile_scenario == "assistant":
+            new_profiles = await profile_manager.extract_profiles_v2(
+                memcells=all_memcells,
+                old_profiles=old_profiles,
+                user_id_list=user_id_list,
+                group_id=group_id,
+                max_items=config.profile_v2_max_items,
+            )
+        else:
+            new_profiles = await profile_manager.extract_profiles(
+                memcells=all_memcells,
+                old_profiles=old_profiles,
+                user_id_list=user_id_list,
+            )
 
-        # Save newly extracted profiles
+        # Save profiles
         for profile in new_profiles:
-            if isinstance(profile, dict):
-                user_id = profile.get('user_id')
-            else:
-                user_id = getattr(profile, 'user_id', None)
-
-            if user_id:
-                await profile_storage.save_profile(
-                    user_id,
-                    profile,
-                    metadata={
+            try:
+                if profile_scenario == "assistant":
+                    user_id = profile.user_id
+                    profile_data = profile.to_dict()
+                    metadata = {
                         "group_id": group_id,
-                        "scenario": profile_scenario,
+                        "scenario": "assistant",
+                        "cluster_id": cluster_id,
+                        "memcell_count": cluster_memcell_count,
+                        "profile_version": "v2",
+                        "total_items": profile.total_items(),
+                    }
+                else:
+                    user_id = profile.get('user_id') if isinstance(profile, dict) else getattr(profile, 'user_id', None)
+                    # Convert to dict if it's a ProfileMemory object
+                    if hasattr(profile, 'to_dict'):
+                        profile_data = profile.to_dict()
+                    elif isinstance(profile, dict):
+                        profile_data = profile
+                    else:
+                        profile_data = profile.__dict__ if hasattr(profile, '__dict__') else profile
+                    metadata = {
+                        "group_id": group_id,
+                        "scenario": "group_chat",
                         "cluster_id": cluster_id,
                         "memcell_count": cluster_memcell_count,
                         "confidence": config.profile_min_confidence,
-                    },
-                )
-                logger.info(
-                    f"[Profile] ✅ Saved Profile: user_id={user_id}, group_id={group_id}, cluster={cluster_id}"
-                )
-            else:
-                logger.warning(
-                    f"[Profile] ⚠️ Profile has no user_id, skipping save: {type(profile)}"
-                )
+                    }
+                
+                if user_id:
+                    await profile_repo.save_profile(user_id, profile_data, metadata=metadata)
+                    logger.info(f"[Profile] ✅ Saved: user={user_id}")
+            except Exception as e:
+                logger.warning(f"[Profile] Failed to save profile: {e}")
 
-        logger.info(
-            f"[Profile] ✅ Profile extraction completed: extracted {len(new_profiles)} profiles"
-        )
+        logger.info(f"[Profile] ✅ Completed: {len(new_profiles)} profiles")
 
     except Exception as e:
-        import traceback
-
         logger.error(f"[Profile] ❌ Profile extraction failed: {e}", exc_info=True)
-        print(f"[Profile] ❌ Profile extraction failed: {e}")
-        print(traceback.format_exc())
-        # Profile extraction failure should not block main flow
 
 
-def _convert_data_type_to_raw_data_type(data_type) -> RawDataType:
-    """
-    Convert different data type enums to unified RawDataType
-
-    Args:
-        data_type: Could be DataTypeEnum, RawDataType, or string
-
-    Returns:
-        RawDataType: Converted unified data type
-    """
-    if isinstance(data_type, RawDataType):
-        return data_type
-
-    # Get string value
-    if hasattr(data_type, 'value'):
-        type_str = data_type.value
-    else:
-        type_str = str(data_type)
-
-    # Mapping conversion
-    type_mapping = {
-        "Conversation": RawDataType.CONVERSATION,
-        "CONVERSATION": RawDataType.CONVERSATION,
-        # Other types map to CONVERSATION as default
-    }
-
-    return type_mapping.get(type_str, RawDataType.CONVERSATION)
 
 
 from biz_layer.mem_db_operations import (
