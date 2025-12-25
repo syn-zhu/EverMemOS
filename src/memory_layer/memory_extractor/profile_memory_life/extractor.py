@@ -13,7 +13,25 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+class ProfileAction(str, Enum):
+    """Profile update actions from LLM."""
+
+    NONE = "none"
+    ADD = "add"
+    UPDATE = "update"
+    DELETE = "delete"
+
+
+class ProfileItemType(str, Enum):
+    """Profile item types."""
+
+    EXPLICIT_INFO = "explicit_info"
+    IMPLICIT_TRAITS = "implicit_traits"
+
 
 from core.observation.logger import get_logger
 from memory_layer.llm.llm_provider import LLMProvider
@@ -24,7 +42,11 @@ from memory_layer.memory_extractor.profile_memory_life.types import (
     ImplicitTrait,
     ProfileMemoryLifeExtractRequest,
 )
-from memory_layer.memory_extractor.profile_memory_life.id_mapper import EpisodeIdMapper
+from memory_layer.memory_extractor.profile_memory_life.id_mapper import (
+    create_id_mapping,
+    replace_sources,
+    get_short_id,
+)
 from memory_layer.prompts import get_prompt_by
 from api_specs.memory_types import MemoryType
 
@@ -39,7 +61,6 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
     def __init__(self, llm_provider: LLMProvider):
         super().__init__(MemoryType.PROFILE)
         self.llm_provider = llm_provider
-        self.id_mapper = EpisodeIdMapper()
 
     async def extract_memory(
         self, request: ProfileMemoryLifeExtractRequest
@@ -96,15 +117,13 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
             logger.info(f"Episode {ep_id} already processed, skipping")
             return current_profile
 
-        # Reset ID mapper
-        self.id_mapper.reset()
-
-        # Pre-register all episode IDs
-        for ep_id in current_profile.processed_episode_ids:
-            self.id_mapper.get_short(ep_id)
-        for ep in cluster_episodes:
-            self.id_mapper.get_short(ep.get("id"))
-        self.id_mapper.get_short(new_episode.get("id"))
+        # Create ID mapping (stateless)
+        all_ids = (
+            list(current_profile.processed_episode_ids)
+            + [ep.get("id") for ep in cluster_episodes]
+            + [new_episode.get("id")]
+        )
+        id_map = create_id_mapping(all_ids)
 
         logger.info(f"Processing Life profile: cluster={len(cluster_episodes)}, new=1")
 
@@ -113,6 +132,7 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
             current_profile=current_profile,
             cluster_episodes=cluster_episodes,
             new_episode=new_episode,
+            id_map=id_map,
         )
 
         if updated_dict:
@@ -120,12 +140,12 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
             # Filter out empty items
             current_profile.explicit_info = [
                 ExplicitInfo.from_dict(d)
-                for d in updated_dict.get("explicit_info", [])
+                for d in updated_dict.get(ProfileItemType.EXPLICIT_INFO, [])
                 if d.get("description", "").strip()  # Must have description
             ]
             current_profile.implicit_traits = [
                 ImplicitTrait.from_dict(d)
-                for d in updated_dict.get("implicit_traits", [])
+                for d in updated_dict.get(ProfileItemType.IMPLICIT_TRAITS, [])
                 if d.get("description", "").strip()  # Must have description
             ]
             current_profile.last_updated = datetime.now()
@@ -146,7 +166,7 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
                 f"Profile has {current_profile.total_items()} items (threshold={compact_threshold}), compacting to {compact_target}..."
             )
             current_profile = await self._compact_profile(
-                current_profile, compact_target
+                current_profile, compact_target, id_map
             )
 
         return current_profile
@@ -156,6 +176,7 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
         current_profile: ProfileMemoryLife,
         cluster_episodes: List[Dict[str, Any]],
         new_episode: Dict[str, Any],
+        id_map: Dict[str, str],
     ) -> Optional[Dict[str, Any]]:
         """Call LLM for incremental update using operations-based approach.
 
@@ -165,14 +186,14 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
 
         # Convert to dict and use short IDs
         profile_dict = current_profile.to_dict()
-        profile_short = self.id_mapper.replace_sources_to_short(profile_dict)
+        profile_short = replace_sources(profile_dict, id_map)
 
         # Format profile with index numbers
         profile_text = self._format_profile_with_index(profile_short)
 
         # Combine cluster_episodes + new_episode into one conversations block
         all_episodes = (cluster_episodes or []) + ([new_episode] if new_episode else [])
-        conversations_text = self._format_episodes_for_llm(all_episodes)
+        conversations_text = self._format_episodes_for_llm(all_episodes, id_map)
 
         # Get prompt template
         prompt_template = get_prompt_by("PROFILE_LIFE_UPDATE_PROMPT")
@@ -186,10 +207,6 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
         try:
             response = await self.llm_provider.generate(prompt, temperature=0.3)
             result = self._parse_profile_response(response)
-            import pprint
-
-            pprint.pprint(prompt)
-            pprint.pprint(result)
             if not result:
                 return None
 
@@ -208,12 +225,12 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
             )
 
             for op in operations:
-                action = op.get("action", "none")
+                action = op.get("action", ProfileAction.NONE)
 
-                if action == "none":
+                if action == ProfileAction.NONE:
                     continue
 
-                elif action == "add":
+                elif action == ProfileAction.ADD:
                     op_type = op.get("type")
                     data = op.get("data", {})
                     if not data.get("description", "").strip():
@@ -222,23 +239,25 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
                     data["sources"] = [
                         self._attach_ts(s, id_to_ts) for s in data.get("sources", [])
                     ]
-                    if op_type == "explicit_info":
+                    if op_type == ProfileItemType.EXPLICIT_INFO:
                         explicit_list.append(data)
                         logger.info(
                             f"[Profile] Added explicit_info: {data.get('description', '')[:30]}..."
                         )
-                    elif op_type == "implicit_traits":
+                    elif op_type == ProfileItemType.IMPLICIT_TRAITS:
                         implicit_list.append(data)
                         logger.info(
                             f"[Profile] Added implicit_trait: {data.get('trait', '')}..."
                         )
 
-                elif action == "update":
+                elif action == ProfileAction.UPDATE:
                     op_type = op.get("type")
                     index = op.get("index", -1)
                     data = op.get("data", {})
                     target_list = (
-                        explicit_list if op_type == "explicit_info" else implicit_list
+                        explicit_list
+                        if op_type == ProfileItemType.EXPLICIT_INFO
+                        else implicit_list
                     )
                     if 0 <= index < len(target_list):
                         # Merge data into existing item
@@ -257,12 +276,14 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
                                     target_list[index][key] = val
                         logger.info(f"[Profile] Updated {op_type}[{index}]")
 
-                elif action == "delete":
+                elif action == ProfileAction.DELETE:
                     op_type = op.get("type")
                     index = op.get("index", -1)
                     reason = op.get("reason", "")
                     target_list = (
-                        explicit_list if op_type == "explicit_info" else implicit_list
+                        explicit_list
+                        if op_type == ProfileItemType.EXPLICIT_INFO
+                        else implicit_list
                     )
                     if 0 <= index < len(target_list) and reason:
                         deleted = target_list.pop(index)
@@ -272,10 +293,10 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
 
             # Convert short IDs back to long IDs
             result_dict = {
-                "explicit_info": explicit_list,
-                "implicit_traits": implicit_list,
+                ProfileItemType.EXPLICIT_INFO: explicit_list,
+                ProfileItemType.IMPLICIT_TRAITS: implicit_list,
             }
-            result_long = self.id_mapper.replace_sources_to_long(result_dict)
+            result_long = replace_sources(result_dict, id_map, reverse=True)
 
             return result_long
 
@@ -325,8 +346,8 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
 
     def _format_profile_with_index(self, profile_dict: Dict[str, Any]) -> str:
         """Format Profile with index numbers for LLM."""
-        explicit = profile_dict.get("explicit_info", [])
-        implicit = profile_dict.get("implicit_traits", [])
+        explicit = profile_dict.get(ProfileItemType.EXPLICIT_INFO, [])
+        implicit = profile_dict.get(ProfileItemType.IMPLICIT_TRAITS, [])
 
         if not explicit and not implicit:
             return ""
@@ -355,12 +376,12 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
         return "\n".join(lines)
 
     async def _compact_profile(
-        self, profile: ProfileMemoryLife, max_items: int
+        self, profile: ProfileMemoryLife, max_items: int, id_map: Dict[str, str]
     ) -> ProfileMemoryLife:
         """Let LLM compact the over-limit Profile."""
 
         profile_dict = profile.to_dict()
-        profile_short = self.id_mapper.replace_sources_to_short(profile_dict)
+        profile_short = replace_sources(profile_dict, id_map)
         profile_text = self._format_profile_for_llm(profile_short)
         total = profile.total_items()
 
@@ -375,16 +396,16 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
             result = self._parse_profile_response(response)
 
             if result:
-                result_long = self.id_mapper.replace_sources_to_long(result)
+                result_long = replace_sources(result, id_map, reverse=True)
                 # Filter out empty items
                 profile.explicit_info = [
                     ExplicitInfo.from_dict(d)
-                    for d in result_long.get("explicit_info", [])
+                    for d in result_long.get(ProfileItemType.EXPLICIT_INFO, [])
                     if d.get("description", "").strip()
                 ]
                 profile.implicit_traits = [
                     ImplicitTrait.from_dict(d)
-                    for d in result_long.get("implicit_traits", [])
+                    for d in result_long.get(ProfileItemType.IMPLICIT_TRAITS, [])
                     if d.get("description", "").strip()
                 ]
                 profile.last_updated = datetime.now()
@@ -406,11 +427,11 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
         # Build set of descriptions from new result
         new_explicit_descs = {
             item.get("description", "").lower().strip()
-            for item in (new_dict.get("explicit_info") or [])
+            for item in (new_dict.get(ProfileItemType.EXPLICIT_INFO) or [])
         }
         new_implicit_descs = {
             item.get("description", "").lower().strip()
-            for item in (new_dict.get("implicit_traits") or [])
+            for item in (new_dict.get(ProfileItemType.IMPLICIT_TRAITS) or [])
         }
 
         # Check for dropped explicit_info
@@ -437,16 +458,16 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
 
         # Merge back dropped items
         if dropped_explicit:
-            new_dict["explicit_info"] = (
-                new_dict.get("explicit_info") or []
+            new_dict[ProfileItemType.EXPLICIT_INFO] = (
+                new_dict.get(ProfileItemType.EXPLICIT_INFO) or []
             ) + dropped_explicit
             logger.info(
                 f"[Profile] Merged back {len(dropped_explicit)} dropped explicit_info items"
             )
 
         if dropped_implicit:
-            new_dict["implicit_traits"] = (
-                new_dict.get("implicit_traits") or []
+            new_dict[ProfileItemType.IMPLICIT_TRAITS] = (
+                new_dict.get(ProfileItemType.IMPLICIT_TRAITS) or []
             ) + dropped_implicit
             logger.info(
                 f"[Profile] Merged back {len(dropped_implicit)} dropped implicit_traits items"
@@ -456,8 +477,8 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
 
     def _format_profile_for_llm(self, profile_dict: Dict[str, Any]) -> str:
         """Format Profile dict into LLM-readable text."""
-        explicit = profile_dict.get("explicit_info", [])
-        implicit = profile_dict.get("implicit_traits", [])
+        explicit = profile_dict.get(ProfileItemType.EXPLICIT_INFO, [])
+        implicit = profile_dict.get(ProfileItemType.IMPLICIT_TRAITS, [])
 
         if not explicit and not implicit:
             return ""
@@ -492,7 +513,9 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
 
         return "\n".join(lines)
 
-    def _format_episodes_for_llm(self, episodes: List[Dict[str, Any]]) -> str:
+    def _format_episodes_for_llm(
+        self, episodes: List[Dict[str, Any]], id_map: Dict[str, str]
+    ) -> str:
         """Format Episode list into LLM-readable text (using short IDs)."""
         if not episodes:
             return ""
@@ -500,7 +523,7 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
         lines = []
         for ep in episodes:
             long_id = ep.get("id")
-            short_id = self.id_mapper.get_short(long_id)
+            short_id = get_short_id(long_id, id_map)
             timestamp = self._format_timestamp(ep.get("created_at"))
 
             lines.append(f"[{short_id}] ({timestamp})")
@@ -524,10 +547,10 @@ class ProfileMemoryLifeExtractor(MemoryExtractor):
 
         return "\n".join(lines)
 
-    def _format_single_episode(self, ep: Dict[str, Any]) -> str:
+    def _format_single_episode(self, ep: Dict[str, Any], id_map: Dict[str, str]) -> str:
         """Format single episode (using short ID)."""
         long_id = ep.get("id", "unknown")
-        short_id = self.id_mapper.get_short(long_id)
+        short_id = get_short_id(long_id, id_map)
         timestamp = self._format_timestamp(ep.get("created_at"))
 
         lines = [f"[{short_id}] ({timestamp})"]

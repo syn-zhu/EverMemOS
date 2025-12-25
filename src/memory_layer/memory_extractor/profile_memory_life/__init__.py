@@ -9,7 +9,11 @@ from memory_layer.memory_extractor.profile_memory_life.types import (
 from memory_layer.memory_extractor.profile_memory_life.extractor import (
     ProfileMemoryLifeExtractor,
 )
-from memory_layer.memory_extractor.profile_memory_life.id_mapper import EpisodeIdMapper
+from memory_layer.memory_extractor.profile_memory_life.id_mapper import (
+    create_id_mapping,
+    replace_sources,
+    get_short_id,
+)
 
 __all__ = [
     "ProfileMemoryLife",
@@ -17,5 +21,7 @@ __all__ = [
     "ImplicitTrait",
     "ProfileMemoryLifeExtractRequest",
     "ProfileMemoryLifeExtractor",
-    "EpisodeIdMapper",
+    "create_id_mapping",
+    "replace_sources",
+    "get_short_id",
 ]
