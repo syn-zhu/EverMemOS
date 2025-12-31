@@ -2,8 +2,7 @@
 Vectorize Service - Hybrid Implementation with Automatic Fallback
 
 This is the main vectorization service with built-in resilience.
-Implements a hybrid strategy: custom self-deployed service (primary) 
-with automatic fallback to DeepInfra (secondary).
+Implements a hybrid strategy with flexible provider selection and automatic fallback.
 
 Usage:
     from agentic_layer.vectorize_service import get_vectorize_service
@@ -21,7 +20,7 @@ import numpy as np
 from core.di.decorators import service
 
 from agentic_layer.vectorize_interface import VectorizeServiceInterface, VectorizeError, UsageInfo
-from agentic_layer.vectorize_custom import CustomVectorizeService, CustomVectorizeConfig
+from agentic_layer.vectorize_vllm import VllmVectorizeService, VllmVectorizeConfig
 from agentic_layer.vectorize_deepinfra import (
     DeepInfraVectorizeService,
     DeepInfraVectorizeConfig,
@@ -34,29 +33,140 @@ logger = logging.getLogger(__name__)
 class HybridVectorizeConfig:
     """Configuration for hybrid vectorize service with fallback"""
 
-    # Custom service config
-    custom_config: CustomVectorizeConfig = field(default_factory=CustomVectorizeConfig)
+    # Provider types
+    primary_provider: str = "vllm"  # vllm or deepinfra
+    fallback_provider: str = "deepinfra"  # vllm, deepinfra, or none
 
-    # DeepInfra config
-    deepinfra_config: DeepInfraVectorizeConfig = field(
-        default_factory=DeepInfraVectorizeConfig
-    )
+    # Primary service config
+    primary_api_key: str = ""
+    primary_base_url: str = ""
+
+    # Fallback service config
+    fallback_api_key: str = ""
+    fallback_base_url: str = ""
+
+    # Shared model configuration
+    model: str = "Qwen/Qwen3-Embedding-4B"
+
+    # Common settings
+    timeout: int = 30
+    max_retries: int = 3
+    batch_size: int = 10
+    max_concurrent_requests: int = 5
+    encoding_format: str = "float"
+    dimensions: int = 1024
 
     # Fallback behavior
     enable_fallback: bool = True
-    max_custom_failures: int = 3
+    max_primary_failures: int = 3
 
     # Runtime state (failure tracking)
-    _custom_failure_count: int = field(default=0, init=False, repr=False)
+    _primary_failure_count: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self):
         """Load hybrid service configuration from environment"""
+        # Read provider types
+        self.primary_provider = os.getenv("VECTORIZE_PROVIDER", self.primary_provider)
+        self.fallback_provider = os.getenv("VECTORIZE_FALLBACK_PROVIDER", self.fallback_provider)
+
+        # Read primary service config
+        self.primary_api_key = os.getenv("VECTORIZE_API_KEY", self.primary_api_key)
+        self.primary_base_url = os.getenv("VECTORIZE_BASE_URL", self.primary_base_url)
+
+        # Read fallback service config
+        self.fallback_api_key = os.getenv("VECTORIZE_FALLBACK_API_KEY", self.fallback_api_key)
+        self.fallback_base_url = os.getenv("VECTORIZE_FALLBACK_BASE_URL", self.fallback_base_url)
+
+        # Read shared model configuration
+        self.model = os.getenv("VECTORIZE_MODEL", self.model)
+
+        # Read common settings
+        self.timeout = int(os.getenv("VECTORIZE_TIMEOUT", str(self.timeout)))
+        self.max_retries = int(os.getenv("VECTORIZE_MAX_RETRIES", str(self.max_retries)))
+        self.batch_size = int(os.getenv("VECTORIZE_BATCH_SIZE", str(self.batch_size)))
+        self.max_concurrent_requests = int(
+            os.getenv("VECTORIZE_MAX_CONCURRENT", str(self.max_concurrent_requests))
+        )
+        self.encoding_format = os.getenv("VECTORIZE_ENCODING_FORMAT", self.encoding_format)
+        self.dimensions = int(os.getenv("VECTORIZE_DIMENSIONS", str(self.dimensions)))
+
+        # Fallback behavior
+        # Enable fallback only if:
+        # 1. fallback_provider is not "none"
+        # 2. fallback_base_url is configured
+        # 3. fallback_api_key is configured (or not required for vllm)
         self.enable_fallback = (
-            os.getenv("ENABLE_EMBEDDING_FALLBACK", "true").lower() == "true"
+            self.fallback_provider.lower() != "none"
+            and bool(self.fallback_base_url)
+            and (
+                self.fallback_provider.lower() == "vllm"  # vllm doesn't require API key
+                or bool(self.fallback_api_key)  # deepinfra requires API key
+            )
         )
-        self.max_custom_failures = int(
-            os.getenv("MAX_CUSTOM_FAILURES", str(self.max_custom_failures))
+        self.max_primary_failures = int(
+            os.getenv("VECTORIZE_MAX_PRIMARY_FAILURES", str(self.max_primary_failures))
         )
+        
+
+
+def _create_service_from_config(
+    provider: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout: int,
+    max_retries: int,
+    batch_size: int,
+    max_concurrent: int,
+    encoding_format: str,
+    dimensions: int,
+) -> VectorizeServiceInterface:
+    """
+    Factory function to create a vectorize service based on provider type
+    
+    Args:
+        provider: Provider type (vllm or deepinfra)
+        api_key: API key for the service
+        base_url: Base URL for the service
+        model: Model name
+        timeout: Request timeout in seconds
+        max_retries: Maximum retry attempts
+        batch_size: Batch size for requests
+        max_concurrent: Maximum concurrent requests
+        encoding_format: Encoding format for embeddings
+        dimensions: Vector dimensions
+        
+    Returns:
+        VectorizeServiceInterface: The created service instance
+    """
+    if provider.lower() == "vllm":
+        config = VllmVectorizeConfig(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            max_retries=max_retries,
+            batch_size=batch_size,
+            max_concurrent_requests=max_concurrent,
+            encoding_format=encoding_format,
+            dimensions=dimensions,
+        )
+        return VllmVectorizeService(config)
+    elif provider.lower() == "deepinfra":
+        config = DeepInfraVectorizeConfig(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            max_retries=max_retries,
+            batch_size=batch_size,
+            max_concurrent_requests=max_concurrent,
+            encoding_format=encoding_format,
+            dimensions=dimensions,
+        )
+        return DeepInfraVectorizeService(config)
+    else:
+        raise VectorizeError(f"Unsupported provider: {provider}")
 
 
 class HybridVectorizeService(VectorizeServiceInterface):
@@ -65,15 +175,15 @@ class HybridVectorizeService(VectorizeServiceInterface):
     
     This service implements a dual-strategy approach:
     1. Implements VectorizeServiceInterface with full API
-    2. Primary: Custom self-deployed service (low cost, fast)
-    3. Secondary: DeepInfra commercial API (high availability)
+    2. Primary: Configurable provider (vllm or deepinfra)
+    3. Secondary: Configurable fallback provider
     4. Automatic failover on errors with failure tracking
     5. All method calls transparently use fallback logic
     
     Strategy Benefits:
-    - Cost optimization: ~95% savings with custom service
+    - Cost optimization: ~95% savings with vllm self-deployed service
     - High availability: Automatic failover ensures reliability
-    - Zero downtime: Continues working during custom service maintenance
+    - Zero downtime: Continues working during vllm service maintenance
     
     Usage:
         service = HybridVectorizeService()
@@ -86,29 +196,54 @@ class HybridVectorizeService(VectorizeServiceInterface):
 
         self.config = config
         
-        # Initialize both services
-        self.custom_service = CustomVectorizeService(config.custom_config)
-        self.deepinfra_service = DeepInfraVectorizeService(config.deepinfra_config)
+        # Create primary service based on provider type
+        self.primary_service = _create_service_from_config(
+            provider=config.primary_provider,
+            api_key=config.primary_api_key,
+            base_url=config.primary_base_url,
+            model=config.model,  # Use shared model
+            timeout=config.timeout,
+            max_retries=config.max_retries,
+            batch_size=config.batch_size,
+            max_concurrent=config.max_concurrent_requests,
+            encoding_format=config.encoding_format,
+            dimensions=config.dimensions,
+        )
         
-        # Current active service
-        self._current_service: VectorizeServiceInterface = self.custom_service
+        # Create fallback service if enabled
+        self.fallback_service = None
+        if config.enable_fallback:
+            self.fallback_service = _create_service_from_config(
+                provider=config.fallback_provider,
+                api_key=config.fallback_api_key,
+                base_url=config.fallback_base_url,
+                model=config.model,  # Use shared model
+                timeout=config.timeout,
+                max_retries=config.max_retries,
+                batch_size=config.batch_size,
+                max_concurrent=config.max_concurrent_requests,
+                encoding_format=config.encoding_format,
+                dimensions=config.dimensions,
+            )
 
         logger.info(
             f"Initialized HybridVectorizeService | "
+            f"primary={config.primary_provider} | "
+            f"fallback={config.fallback_provider} | "
             f"fallback_enabled={config.enable_fallback} | "
-            f"max_failures={config.max_custom_failures}"
+            f"max_failures={config.max_primary_failures}"
         )
 
     def get_service(self) -> VectorizeServiceInterface:
         """
-        Get the current active service (for advanced usage)
+        Get the primary service (for advanced usage)
         
         Returns:
-            VectorizeServiceInterface: The active service (custom or deepinfra)
+            VectorizeServiceInterface: The primary service
             
         Note: Prefer using proxy methods directly for automatic fallback
         """
-        return self._current_service
+        return self.primary_service
     
     # Implement VectorizeServiceInterface methods with automatic fallback
     
@@ -118,8 +253,8 @@ class HybridVectorizeService(VectorizeServiceInterface):
         """Get embedding for a single text with automatic fallback"""
         return await self.execute_with_fallback(
             "get_embedding",
-            lambda: self.custom_service.get_embedding(text, instruction, is_query),
-            lambda: self.deepinfra_service.get_embedding(text, instruction, is_query),
+            lambda: self.primary_service.get_embedding(text, instruction, is_query),
+            lambda: self.fallback_service.get_embedding(text, instruction, is_query) if self.fallback_service else None,
         )
     
     async def get_embedding_with_usage(
@@ -128,8 +263,8 @@ class HybridVectorizeService(VectorizeServiceInterface):
         """Get embedding with usage information with automatic fallback"""
         return await self.execute_with_fallback(
             "get_embedding_with_usage",
-            lambda: self.custom_service.get_embedding_with_usage(text, instruction, is_query),
-            lambda: self.deepinfra_service.get_embedding_with_usage(text, instruction, is_query),
+            lambda: self.primary_service.get_embedding_with_usage(text, instruction, is_query),
+            lambda: self.fallback_service.get_embedding_with_usage(text, instruction, is_query) if self.fallback_service else None,
         )
     
     async def get_embeddings(
@@ -141,8 +276,8 @@ class HybridVectorizeService(VectorizeServiceInterface):
         """Get embeddings for multiple texts with automatic fallback"""
         return await self.execute_with_fallback(
             "get_embeddings",
-            lambda: self.custom_service.get_embeddings(texts, instruction, is_query),
-            lambda: self.deepinfra_service.get_embeddings(texts, instruction, is_query),
+            lambda: self.primary_service.get_embeddings(texts, instruction, is_query),
+            lambda: self.fallback_service.get_embeddings(texts, instruction, is_query) if self.fallback_service else None,
         )
     
     async def get_embeddings_batch(
@@ -154,13 +289,13 @@ class HybridVectorizeService(VectorizeServiceInterface):
         """Get embeddings for multiple batches with automatic fallback"""
         return await self.execute_with_fallback(
             "get_embeddings_batch",
-            lambda: self.custom_service.get_embeddings_batch(text_batches, instruction, is_query),
-            lambda: self.deepinfra_service.get_embeddings_batch(text_batches, instruction, is_query),
+            lambda: self.primary_service.get_embeddings_batch(text_batches, instruction, is_query),
+            lambda: self.fallback_service.get_embeddings_batch(text_batches, instruction, is_query) if self.fallback_service else None,
         )
     
     def get_model_name(self) -> str:
-        """Get the current model name (from custom service)"""
-        return self.custom_service.get_model_name()
+        """Get the current model name (from primary service)"""
+        return self.primary_service.get_model_name()
 
     async def execute_with_fallback(self, operation_name: str, primary_func, fallback_func):
         """
@@ -169,7 +304,7 @@ class HybridVectorizeService(VectorizeServiceInterface):
         Args:
             operation_name: Name of the operation for logging
             primary_func: Function to call on primary service
-            fallback_func: Function to call on fallback service
+            fallback_func: Function to call on fallback service (or None if no fallback)
             
         Returns:
             Result from primary or fallback service
@@ -177,62 +312,64 @@ class HybridVectorizeService(VectorizeServiceInterface):
         Raises:
             VectorizeError: If both services fail
         """
-        # Try primary (custom) service first
+        # Try primary service first
         try:
             result = await primary_func()
             # Reset failure count on success
-            self.config._custom_failure_count = 0
+            self.config._primary_failure_count = 0
             return result
 
         except Exception as primary_error:
             # Increment failure count
-            self.config._custom_failure_count += 1
+            self.config._primary_failure_count += 1
 
             logger.warning(
-                f"Custom service {operation_name} failed "
-                f"(count: {self.config._custom_failure_count}): {primary_error}"
+                f"Primary service ({self.config.primary_provider}) {operation_name} failed "
+                f"(count: {self.config._primary_failure_count}): {primary_error}"
             )
 
             # Check if fallback is enabled
-            if not self.config.enable_fallback:
-                logger.error("Fallback disabled, re-raising error")
+            if not self.config.enable_fallback or fallback_func is None:
+                logger.error("Fallback disabled or not configured, re-raising error")
                 raise VectorizeError(
-                    f"Custom service failed and fallback is disabled: {primary_error}"
+                    f"Primary service failed and fallback is disabled: {primary_error}"
                 )
 
             # Check if exceeded max failures
-            if self.config._custom_failure_count >= self.config.max_custom_failures:
+            if self.config._primary_failure_count >= self.config.max_primary_failures:
                 logger.warning(
-                    f"⚠️ Custom service exceeded max failures ({self.config.max_custom_failures}), "
-                    f"using DeepInfra fallback"
+                    f"⚠️ Primary service exceeded max failures ({self.config.max_primary_failures}), "
+                    f"using {self.config.fallback_provider} fallback"
                 )
 
             # Try fallback service
             try:
-                logger.info(f"🔄 Falling back to DeepInfra for {operation_name}")
+                logger.info(f"🔄 Falling back to {self.config.fallback_provider} for {operation_name}")
                 result = await fallback_func()
                 return result
 
             except Exception as fallback_error:
                 logger.error(f"❌ Fallback also failed: {fallback_error}")
                 raise VectorizeError(
-                    f"Both custom and fallback services failed. "
-                    f"Custom: {primary_error}, Fallback: {fallback_error}"
+                    f"Both primary and fallback services failed. "
+                    f"Primary ({self.config.primary_provider}): {primary_error}, "
+                    f"Fallback ({self.config.fallback_provider}): {fallback_error}"
                 )
 
     def get_failure_count(self) -> int:
-        """Get current custom service failure count"""
-        return self.config._custom_failure_count
+        """Get current primary service failure count"""
+        return self.config._primary_failure_count
 
     def reset_failure_count(self):
         """Reset failure count (useful for health check recovery)"""
-        self.config._custom_failure_count = 0
-        logger.info("Reset custom service failure count to 0")
+        self.config._primary_failure_count = 0
+        logger.info("Reset primary service failure count to 0")
 
     async def close(self):
         """Close all services"""
-        await self.custom_service.close()
-        await self.deepinfra_service.close()
+        await self.primary_service.close()
+        if self.fallback_service:
+            await self.fallback_service.close()
 
 
 # Global service instance (lazy initialization)

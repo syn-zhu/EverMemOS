@@ -33,32 +33,6 @@ class DeepInfraRerankConfig:
     batch_size: int = 10
     max_concurrent_requests: int = 5
 
-    def __post_init__(self):
-        """Load configuration from environment variables"""
-        if not self.api_key:
-            self.api_key = os.getenv("DEEPINFRA_RERANK_API_KEY") or os.getenv("RERANK_API_KEY", "")
-
-        if self.base_url == "https://api.deepinfra.com/v1/inference":
-            self.base_url = os.getenv(
-                "DEEPINFRA_RERANK_BASE_URL",
-                os.getenv("RERANK_BASE_URL", self.base_url),
-            )
-
-        if self.model == "Qwen/Qwen3-Reranker-4B":
-            self.model = os.getenv(
-                "DEEPINFRA_RERANK_MODEL",
-                os.getenv("RERANK_MODEL", self.model),
-            )
-
-        if self.timeout == 30:
-            self.timeout = int(os.getenv("DEEPINFRA_RERANK_TIMEOUT", os.getenv("RERANK_TIMEOUT", "30")))
-        if self.max_retries == 3:
-            self.max_retries = int(os.getenv("RERANK_MAX_RETRIES", "3"))
-        if self.batch_size == 10:
-            self.batch_size = int(os.getenv("RERANK_BATCH_SIZE", "10"))
-        if self.max_concurrent_requests == 5:
-            self.max_concurrent_requests = int(os.getenv("RERANK_MAX_CONCURRENT", "5"))
-
 
 class DeepInfraRerankService(RerankServiceInterface):
     """DeepInfra reranking service implementation"""

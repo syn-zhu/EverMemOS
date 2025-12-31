@@ -1,15 +1,13 @@
 """
-Custom (Self-Deployed) Vectorize Service Implementation
+Base Vectorize Service Implementation
 
-This module provides vectorization service for self-deployed embedding servers,
-such as vLLM, Ollama, or other OpenAI-compatible endpoints.
+Provides common functionality for embedding services using OpenAI-compatible APIs.
 """
 
-import os
 import asyncio
 import logging
 from typing import List, Optional, Tuple
-from dataclasses import dataclass
+from abc import abstractmethod
 import numpy as np
 from openai import AsyncOpenAI
 
@@ -22,58 +20,40 @@ from agentic_layer.vectorize_interface import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class CustomVectorizeConfig:
-    """Configuration for custom self-deployed vectorization service"""
-
-    base_url: str = "http://localhost:8000/v1"
-    api_key: str = "EMPTY"  # Many self-deployed services don't require API key
-    model: str = "Qwen/Qwen3-Embedding-4B"
-    timeout: int = 30
-    max_retries: int = 3
-    batch_size: int = 10
-    max_concurrent_requests: int = 5
-    encoding_format: str = "float"
-    dimensions: int = 1024  # Client-side truncation target
-
-    def __post_init__(self):
-        """Load configuration from environment variables"""
-        # Always read from environment variables, they override defaults
-        self.base_url = os.getenv("CUSTOM_EMBEDDING_URL", self.base_url)
-        self.api_key = os.getenv("CUSTOM_EMBEDDING_API_KEY", self.api_key)
-        self.model = os.getenv("CUSTOM_EMBEDDING_MODEL", self.model)
-
-        self.timeout = int(os.getenv("VECTORIZE_TIMEOUT", str(self.timeout)))
-        self.max_retries = int(os.getenv("VECTORIZE_MAX_RETRIES", str(self.max_retries)))
-        self.batch_size = int(os.getenv("VECTORIZE_BATCH_SIZE", str(self.batch_size)))
-        self.max_concurrent_requests = int(
-            os.getenv("VECTORIZE_MAX_CONCURRENT", str(self.max_concurrent_requests))
-        )
-        self.encoding_format = os.getenv("VECTORIZE_ENCODING_FORMAT", self.encoding_format)
-        self.dimensions = int(os.getenv("VECTORIZE_DIMENSIONS", str(self.dimensions)))
-
-
-class CustomVectorizeService(VectorizeServiceInterface):
+class BaseVectorizeService(VectorizeServiceInterface):
     """
-    Custom self-deployed embedding service implementation
+    Base class for OpenAI-compatible embedding services
     
-    Supports:
-    - vLLM (https://github.com/vllm-project/vllm)
-    - Ollama (https://ollama.ai)
-    - Any OpenAI-compatible embedding endpoint
+    Subclasses only need to implement:
+    - _get_config_params(): return (api_key, base_url, model)
+    - _should_pass_dimensions(): return True/False
+    - _should_truncate_client_side(): return True/False
     """
 
-    def __init__(self, config: Optional[CustomVectorizeConfig] = None):
-        if config is None:
-            config = CustomVectorizeConfig()
-
+    def __init__(self, config):
         self.config = config
         self.client: Optional[AsyncOpenAI] = None
         self._semaphore = asyncio.Semaphore(config.max_concurrent_requests)
-
+        
+        api_key, base_url, model = self._get_config_params()
         logger.info(
-            f"Initialized CustomVectorizeService | model={config.model} | base_url={config.base_url}"
+            f"Initialized {self.__class__.__name__} | model={model} | base_url={base_url}"
         )
+
+    @abstractmethod
+    def _get_config_params(self) -> Tuple[str, str, str]:
+        """Return (api_key, base_url, model) for logging"""
+        pass
+
+    @abstractmethod
+    def _should_pass_dimensions(self) -> bool:
+        """Whether to pass dimensions parameter to API"""
+        pass
+
+    @abstractmethod
+    def _should_truncate_client_side(self) -> bool:
+        """Whether to truncate embeddings on client side"""
+        pass
 
     async def __aenter__(self):
         await self._ensure_client()
@@ -103,7 +83,7 @@ class CustomVectorizeService(VectorizeServiceInterface):
         instruction: Optional[str] = None,
         is_query: bool = False,
     ):
-        """Make embedding request to custom service"""
+        """Make embedding request to API"""
         await self._ensure_client()
         if not self.config.model:
             raise VectorizeError("Embedding model is not configured.")
@@ -129,8 +109,11 @@ class CustomVectorizeService(VectorizeServiceInterface):
                         "model": self.config.model,
                         "input": formatted_texts,
                         "encoding_format": self.config.encoding_format,
-                        # Never pass dimensions parameter - always use client-side truncation
                     }
+
+                    # Add dimensions parameter if supported
+                    if self._should_pass_dimensions() and self.config.dimensions > 0:
+                        request_kwargs["dimensions"] = self.config.dimensions
 
                     response = await self.client.embeddings.create(**request_kwargs)
                     return response
@@ -138,7 +121,7 @@ class CustomVectorizeService(VectorizeServiceInterface):
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(
-                        f"Custom service API error (attempt {attempt + 1}/{self.config.max_retries}): {error_msg}"
+                        f"{self.__class__.__name__} API error (attempt {attempt + 1}/{self.config.max_retries}): {error_msg}"
                     )
                     
                     # Log detailed error for debugging
@@ -151,7 +134,9 @@ class CustomVectorizeService(VectorizeServiceInterface):
                         await asyncio.sleep(2**attempt)
                         continue
                     else:
-                        raise VectorizeError(f"Custom service API request failed after {self.config.max_retries} attempts: {error_msg}")
+                        raise VectorizeError(
+                            f"{self.__class__.__name__} API request failed after {self.config.max_retries} attempts: {error_msg}"
+                        )
 
     def _parse_embeddings_response(self, response) -> List[np.ndarray]:
         """Parse embeddings from API response"""
@@ -162,16 +147,18 @@ class CustomVectorizeService(VectorizeServiceInterface):
         for item in response.data:
             emb = np.array(item.embedding, dtype=np.float32)
 
-            # Client-side truncation (simple truncation without re-normalization)
-            if (
-                self.config.dimensions
-                and self.config.dimensions > 0
-                and len(emb) > self.config.dimensions
-            ):
-                logger.debug(
-                    f"Client-side truncation: {len(emb)}D → {self.config.dimensions}D"
-                )
-                emb = emb[: self.config.dimensions]
+            # Client-side truncation if needed
+            if self._should_truncate_client_side():
+                if (
+                    self.config.dimensions
+                    and self.config.dimensions > 0
+                    and len(emb) > self.config.dimensions
+                ):
+                    logger.debug(
+                        f"Client-side truncation: {len(emb)}D → {self.config.dimensions}D"
+                    )
+                    emb = emb[: self.config.dimensions]
+
             embeddings.append(emb)
         return embeddings
 
