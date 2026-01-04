@@ -421,3 +421,6 @@ class DeepInfraRerankService(RerankServiceInterface):
                 sorted_hits = sorted_hits[:top_k]
             return sorted_hits
 
+    def get_model_name(self) -> str:
+        """Get the current model name"""
+        return self.config.model

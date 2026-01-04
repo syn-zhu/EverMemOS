@@ -155,11 +155,11 @@ class VllmRerankService(RerankServiceInterface):
         # Prepare documents for reranking
         documents = []
         for mem in memories:
-            if memory_type == MemoryType.EPISODIC:
+            if memory_type == MemoryType.EPISODIC_MEMORY:
                 # For episodic: use content
                 doc_text = mem.content or ""
-            else:  # SEMANTIC
-                # For semantic: use memory_text
+            else:  # PROFILE, FORESIGHT, etc.
+                # For other types: use memory_text
                 doc_text = mem.memory_text or ""
             documents.append(doc_text)
 
