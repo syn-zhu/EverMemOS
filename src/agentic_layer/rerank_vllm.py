@@ -77,7 +77,7 @@ class VllmRerankService(RerankServiceInterface):
         formatted_query = f"{prefix}<Instruct>: {instruction}\n<Query>: {query}\n"
         formatted_docs = [f"<Document>: {doc}{suffix}" for doc in documents]
 
-        return [formatted_query] * len(documents), formatted_docs
+        return [formatted_query], formatted_docs
 
     async def _send_rerank_request_batch(
         self,
