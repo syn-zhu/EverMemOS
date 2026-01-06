@@ -146,18 +146,22 @@ class MemoryManager:
             FetchMemResponse containing query results
         """
         logger.debug(
-            f"fetch_mem called with request: user_id={request.user_id}, memory_type={request.memory_type}"
+            f"fetch_mem called with request: user_id={request.user_id}, group_id={request.group_id}, "
+            f"memory_type={request.memory_type}, time_range=[{request.start_time}, {request.end_time}]"
         )
 
-        # repository supports MemoryType.MULTIPLE type, default is corememory
-        response = await self._fetch_service.find_by_user_id(
+        # repository supports MemoryType.EPISODIC_MEMORY type, default is episodic memory
+        response = await self._fetch_service.find_memories(
             user_id=request.user_id,
             memory_type=request.memory_type,
+            group_id=request.group_id,
+            start_time=request.start_time,
+            end_time=request.end_time,
             version_range=request.version_range,
             limit=request.limit,
         )
 
-        # Note: response.metadata already contains complete employee information via _get_employee_metadata
+        # Note: response.metadata already contains complete employee information
         # including source, user_id, memory_type, limit, email, phone, full_name
         # No need to update again here, as fetch_mem_service already provides correct information
 

@@ -15,12 +15,14 @@ from api_specs.dtos.memory_query import RetrieveMemRequest, FetchMemRequest
 from api_specs.dtos.memory_command import MemorizeRequest
 from api_specs.memory_types import RawDataType
 from api_specs.dtos.memory_command import RawData
+from core.oxm.constants import QUERY_ALL
 
 from typing import Dict, Any, Optional
 from common_utils.datetime_utils import from_iso_format
 from zoneinfo import ZoneInfo
 from core.observation.logger import get_logger
 from api_specs.memory_models import RetrieveMethod, MemoryType
+
 logger = get_logger(__name__)
 
 
@@ -46,12 +48,10 @@ def convert_dict_to_fetch_mem_request(data: Dict[str, Any]) -> FetchMemRequest:
         ValueError: When required fields are missing or have incorrect types
     """
     try:
-        # Validate required fields
-        if "user_id" not in data:
-            raise ValueError("user_id is a required field")
-
         # Convert memory_type, use default if not provided
-        memory_type = MemoryType(data.get("memory_type", "multiple"))
+        memory_type = MemoryType(
+            data.get("memory_type", MemoryType.EPISODIC_MEMORY.value)
+        )
         logger.debug(f"version_range: {data.get('version_range', None)}")
 
         # Convert limit and offset to integer type (all obtained from query_params are strings)
@@ -64,14 +64,16 @@ def convert_dict_to_fetch_mem_request(data: Dict[str, Any]) -> FetchMemRequest:
 
         # Build FetchMemRequest object
         return FetchMemRequest(
-            user_id=data["user_id"],
+            user_id=data.get("user_id", QUERY_ALL),
+            group_id=data.get("group_id", QUERY_ALL),
             memory_type=memory_type,
             limit=limit,
             offset=offset,
-            filters=data.get("filters", {}),
             sort_by=data.get("sort_by"),
             sort_order=data.get("sort_order", "desc"),
             version_range=data.get("version_range", None),
+            start_time=data.get("start_time"),
+            end_time=data.get("end_time"),
         )
     except Exception as e:
         raise ValueError(f"FetchMemRequest conversion failed: {e}")
@@ -99,7 +101,6 @@ def convert_dict_to_retrieve_mem_request(
         #     raise ValueError("user_id or group_id at least one is required")
 
         # Handle retrieve_method, use default keyword if not provided
-        
 
         retrieve_method_str = data.get("retrieve_method", "keyword")
         logger.debug(f"[DEBUG] retrieve_method_str from data: {retrieve_method_str!r}")
@@ -133,7 +134,9 @@ def convert_dict_to_retrieve_mem_request(
         raw_memory_types = data.get("memory_types", [])
         # Handle comma-separated string (from query_params)
         if isinstance(raw_memory_types, str):
-            raw_memory_types = [mt.strip() for mt in raw_memory_types.split(",") if mt.strip()]
+            raw_memory_types = [
+                mt.strip() for mt in raw_memory_types.split(",") if mt.strip()
+            ]
         memory_types = []
         for mt in raw_memory_types:
             if isinstance(mt, str):
@@ -266,11 +269,7 @@ def build_raw_data_from_simple_message(
     if extra_metadata:
         metadata.update(extra_metadata)
 
-    return RawData(
-        content=raw_content,
-        data_id=message_id,
-        metadata=metadata,
-    )
+    return RawData(content=raw_content, data_id=message_id, metadata=metadata)
 
 
 async def convert_simple_message_to_memorize_request(

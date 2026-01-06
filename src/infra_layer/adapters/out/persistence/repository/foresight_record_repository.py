@@ -4,12 +4,15 @@ ForesightRecord Repository
 Provides generic CRUD operations and query capabilities for foresight records.
 """
 
+from datetime import datetime
 from typing import List, Optional, Type, TypeVar, Union
 from pymongo.asynchronous.client_session import AsyncClientSession
 from bson import ObjectId
 from core.observation.logger import get_logger
 from core.di.decorators import repository
 from core.oxm.mongo.base_repository import BaseRepository
+from core.oxm.constants import QUERY_ALL
+from common_utils.datetime_utils import to_date_str
 from infra_layer.adapters.out.persistence.document.memory.foresight_record import (
     ForesightRecord,
     ForesightRecordProjection,
@@ -152,19 +155,35 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
             )
             return []
 
-    async def get_by_user_id(
+    async def find_by_filters(
         self,
-        user_id: str,
+        user_id: Optional[str] = QUERY_ALL,
+        group_id: Optional[str] = QUERY_ALL,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         limit: Optional[int] = None,
         skip: Optional[int] = None,
         session: Optional[AsyncClientSession] = None,
         model: Optional[Type[T]] = None,
     ) -> List[Union[ForesightRecord, ForesightRecordProjection]]:
         """
-        Retrieve list of foresights by user ID
+        Retrieve list of foresights by filters (user_id, group_id, and/or validity time range)
 
         Args:
             user_id: User ID
+                - Not provided or QUERY_ALL ("__all__"): Don't filter by user_id
+                - None or "": Filter for null/empty values (records with user_id as None or "")
+                - Other values: Exact match
+            group_id: Group ID
+                - Not provided or QUERY_ALL ("__all__"): Don't filter by group_id
+                - None or "": Filter for null/empty values (records with group_id as None or "")
+                - Other values: Exact match
+            start_time: Optional query start time (datetime object)
+                - Filters foresights whose validity period overlaps with [start_time, end_time)
+                - Will be converted to ISO date string (YYYY-MM-DD) internally
+            end_time: Optional query end time (datetime object)
+                - Filters foresights whose validity period overlaps with [start_time, end_time)
+                - Will be converted to ISO date string (YYYY-MM-DD) internally
             limit: Limit number of returned records
             skip: Number of records to skip
             session: Optional MongoDB session for transaction support
@@ -174,15 +193,52 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
             List of foresight objects of specified type
         """
         try:
+            # Build query filter
+            filter_dict = {}
+
+            # Convert datetime to ISO date string for foresight validity period comparison
+            start_str = to_date_str(start_time)
+            end_str = to_date_str(end_time)
+
+            # Handle time range filter (overlap query)
+            # Logic: foresight.start_time <= query.end_time AND foresight.end_time >= query.start_time
+            if start_str is not None and end_str is not None:
+                filter_dict["$and"] = [
+                    {"start_time": {"$lte": end_str}},
+                    {"end_time": {"$gte": start_str}},
+                ]
+            elif start_str is not None:
+                # Only start_time: find foresights that end after start_time
+                filter_dict["end_time"] = {"$gte": start_str}
+            elif end_str is not None:
+                # Only end_time: find foresights that start before end_time
+                filter_dict["start_time"] = {"$lte": end_str}
+
+            # Handle user_id filter
+            if user_id != QUERY_ALL:
+                if user_id == "" or user_id is None:
+                    # Explicitly filter for null or empty string
+                    filter_dict["user_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["user_id"] = user_id
+
+            # Handle group_id filter
+            if group_id != QUERY_ALL:
+                if group_id == "" or group_id is None:
+                    # Explicitly filter for null or empty string
+                    filter_dict["group_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["group_id"] = group_id
+
             # Use full version if model is not specified
             target_model = model if model is not None else self.model
 
             # Determine whether to use projection based on model type
             if target_model == self.model:
-                query = self.model.find({"user_id": user_id}, session=session)
+                query = self.model.find(filter_dict, session=session)
             else:
                 query = self.model.find(
-                    {"user_id": user_id}, projection_model=target_model, session=session
+                    filter_dict, projection_model=target_model, session=session
                 )
 
             if skip:
@@ -192,14 +248,17 @@ class ForesightRecordRawRepository(BaseRepository[ForesightRecord]):
 
             results = await query.to_list()
             logger.debug(
-                "✅ Retrieved foresights by user ID successfully: %s, found %d records (model=%s)",
+                "✅ Retrieved foresights successfully: user_id=%s, group_id=%s, time_range=[%s, %s), found %d records (model=%s)",
                 user_id,
+                group_id,
+                start_str,
+                end_str,
                 len(results),
                 target_model.__name__,
             )
             return results
         except Exception as e:
-            logger.error("❌ Failed to retrieve foresights by user ID: %s", e)
+            logger.error("❌ Failed to retrieve foresights: %s", e)
             return []
 
     async def delete_by_id(

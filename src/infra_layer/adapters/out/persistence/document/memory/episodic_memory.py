@@ -80,6 +80,9 @@ class EpisodicMemory(DocumentBase, AuditBase):
 
         name = "episodic_memories"
         indexes = [
+            # Single field indexes
+            IndexModel([("user_id", ASCENDING)], name="idx_user_id"),
+            IndexModel([("group_id", ASCENDING)], name="idx_group_id", sparse=True),
             # Composite index on user ID and timestamp
             IndexModel(
                 [("user_id", ASCENDING), ("timestamp", DESCENDING)],
@@ -89,6 +92,17 @@ class EpisodicMemory(DocumentBase, AuditBase):
             IndexModel(
                 [("group_id", ASCENDING), ("timestamp", DESCENDING)],
                 name="idx_group_timestamp",
+            ),
+            # Composite index on group ID, user ID and timestamp
+            # Note: This also covers (group_id, user_id) queries by left-prefix rule
+            IndexModel(
+                [
+                    ("group_id", ASCENDING),
+                    ("user_id", ASCENDING),
+                    ("timestamp", DESCENDING),
+                ],
+                name="idx_group_user_timestamp",
+                sparse=True,
             ),
             # Index on keywords
             IndexModel([("keywords", ASCENDING)], name="idx_keywords", sparse=True),

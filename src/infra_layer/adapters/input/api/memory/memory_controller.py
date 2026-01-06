@@ -275,7 +275,7 @@ class MemoryController(BaseController):
         
         ## Functionality:
         - Directly retrieve stored core memories based on user ID
-        - Support multiple memory types: base memory, user profile, preference settings, etc.
+        - Support multiple memory types: profile, episode_memory, foresight, event_log
         - Support pagination and sorting
         - Suitable for scenarios requiring quick retrieval of fixed user memory sets
         
@@ -284,7 +284,6 @@ class MemoryController(BaseController):
         - **profile**: User profile, containing user characteristics and attributes
         - **preference**: User preferences, containing user likes and settings
         - **episode_memory**: Episodic memory summaries
-        - **multiple**: Multiple types (default), includes base_memory, profile, preference
         
         ## Use cases:
         - User profile display

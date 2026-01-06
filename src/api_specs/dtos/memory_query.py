@@ -1,35 +1,49 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from api_specs.memory_types import BaseMemory
 from api_specs.memory_models import MemoryType, Metadata, MemoryModel, RetrieveMethod
 from common_utils.datetime_utils import get_timezone
+from core.oxm.constants import QUERY_ALL, MAX_FETCH_LIMIT
 
 
 @dataclass
 class FetchMemRequest:
-    """Memory retrieval request"""
+    """Memory retrieval request
 
-    user_id: str
+    Note:
+    - user_id and group_id support special value QUERY_ALL ("__all__") to skip filtering
+    - Empty string or None for user_id/group_id filters for null/empty values
+    - user_id and group_id cannot both be QUERY_ALL
+    - limit is capped at MAX_FETCH_LIMIT (500)
+    """
+
+    user_id: str = QUERY_ALL  # User ID, use QUERY_ALL to skip user filtering
+    group_id: str = QUERY_ALL  # Group ID, use QUERY_ALL to skip group filtering
     limit: Optional[int] = 40
     offset: Optional[int] = 0
-    filters: Optional[Dict[str, Any]] = field(default_factory=dict)
-    memory_type: Optional[MemoryType] = MemoryType.MULTIPLE
+    memory_type: Optional[MemoryType] = MemoryType.EPISODIC_MEMORY
     sort_by: Optional[str] = None
     sort_order: str = "desc"  # "asc" or "desc"
     version_range: Optional[tuple[Optional[str], Optional[str]]] = (
         None  # Version range (start, end), closed interval [start, end]
     )
+    start_time: Optional[str] = None  # Start time for time range filtering
+    end_time: Optional[str] = None  # End time for time range filtering
+
+    def __post_init__(self):
+        """Validate request parameters"""
+        if self.user_id == QUERY_ALL and self.group_id == QUERY_ALL:
+            raise ValueError("user_id and group_id cannot both be QUERY_ALL")
+
+        # Cap limit at MAX_FETCH_LIMIT
+        if self.limit and self.limit > MAX_FETCH_LIMIT:
+            self.limit = MAX_FETCH_LIMIT
 
     def get_memory_types(self) -> List[MemoryType]:
         """Get the list of memory types to query"""
-        if self.memory_type == MemoryType.MULTIPLE:
-            # When MULTIPLE, return BASE_MEMORY, PROFILE, PREFERENCE
-            return [MemoryType.BASE_MEMORY, MemoryType.PROFILE, MemoryType.PREFERENCE]
-        else:
-            return [self.memory_type]
+        return [self.memory_type]
 
 
 @dataclass

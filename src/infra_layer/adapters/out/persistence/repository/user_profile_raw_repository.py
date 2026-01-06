@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List
 from core.observation.logger import get_logger
 from core.di.decorators import repository
 from core.oxm.mongo.base_repository import BaseRepository
+from core.oxm.constants import QUERY_ALL
 
 from infra_layer.adapters.out.persistence.document.memory.user_profile import (
     UserProfile,
@@ -109,13 +110,90 @@ class UserProfileRawRepository(BaseRepository[UserProfile]):
 
     async def get_all_by_user(self, user_id: str, limit: int = 40) -> List[UserProfile]:
         try:
-            return await self.model.find(
-                UserProfile.user_id == user_id
-            ).sort([("version", -1)]).limit(limit).to_list()
+            return (
+                await self.model.find(UserProfile.user_id == user_id)
+                .sort([("version", -1)])
+                .limit(limit)
+                .to_list()
+            )
         except Exception as e:
             logger.error(f"Failed to get user profile: user_id={user_id}, error={e}")
             return []
-    
+
+    async def find_by_filters(
+        self,
+        user_id: Optional[str] = QUERY_ALL,
+        group_id: Optional[str] = QUERY_ALL,
+        limit: Optional[int] = None,
+    ) -> List[UserProfile]:
+        """
+        Retrieve list of user profiles by filters (user_id and/or group_id)
+
+        Args:
+            user_id: User ID
+                - Not provided or QUERY_ALL ("__all__"): Don't filter by user_id
+                - None or "": Filter for null/empty values (records with user_id as None or "")
+                - Other values: Exact match
+            group_id: Group ID
+                - Not provided or QUERY_ALL ("__all__"): Don't filter by group_id
+                - None or "": Filter for null/empty values (records with group_id as None or "")
+                - Other values: Exact match
+            limit: Limit number of returned results
+
+        Returns:
+            List of UserProfile
+        """
+        try:
+            # Build query conditions
+            conditions = []
+
+            # Handle user_id filter
+            if user_id != QUERY_ALL:
+                if user_id == "" or user_id is None:
+                    # Explicitly filter for null or empty string
+                    conditions.append(
+                        (UserProfile.user_id == None) | (UserProfile.user_id == "")
+                    )
+                else:
+                    conditions.append(UserProfile.user_id == user_id)
+
+            # Handle group_id filter
+            if group_id != QUERY_ALL:
+                if group_id == "" or group_id is None:
+                    # Explicitly filter for null or empty string
+                    conditions.append(
+                        (UserProfile.group_id == None) | (UserProfile.group_id == "")
+                    )
+                else:
+                    conditions.append(UserProfile.group_id == group_id)
+
+            # Build query
+            if conditions:
+                # Combine conditions with AND
+                query = self.model.find(*conditions)
+            else:
+                # No conditions - find all
+                query = self.model.find()
+
+            # Sort by version descending
+            query = query.sort([("version", -1)])
+
+            # Apply limit
+            if limit:
+                query = query.limit(limit)
+
+            results = await query.to_list()
+            logger.debug(
+                "✅ Retrieved user profiles successfully: user_id=%s, group_id=%s, found %d records",
+                user_id,
+                group_id,
+                len(results),
+            )
+            return results
+        except Exception as e:
+            logger.error("❌ Failed to retrieve user profiles: %s", e)
+            return []
+
     async def upsert(
         self,
         user_id: str,

@@ -11,6 +11,7 @@ from bson import ObjectId
 from core.observation.logger import get_logger
 from core.di.decorators import repository
 from core.oxm.mongo.base_repository import BaseRepository
+from core.oxm.constants import QUERY_ALL
 from infra_layer.adapters.out.persistence.document.memory.event_log_record import (
     EventLogRecord,
     EventLogRecordProjection,
@@ -153,9 +154,12 @@ class EventLogRecordRawRepository(BaseRepository[EventLogRecord]):
             )
             return []
 
-    async def get_by_user_id(
+    async def find_by_filters(
         self,
-        user_id: str,
+        user_id: Optional[str] = QUERY_ALL,
+        group_id: Optional[str] = QUERY_ALL,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         limit: Optional[int] = None,
         skip: Optional[int] = None,
         sort_desc: bool = True,
@@ -163,87 +167,58 @@ class EventLogRecordRawRepository(BaseRepository[EventLogRecord]):
         model: Optional[Type[T]] = None,
     ) -> List[Union[EventLogRecord, EventLogRecordProjection]]:
         """
-        Get list of event logs by user ID
+        Get list of event logs by filters (user_id, group_id, and/or time range)
 
         Args:
             user_id: User ID
+                - Not provided or QUERY_ALL ("__all__"): Don't filter by user_id
+                - None or "": Filter for null/empty values (records with user_id as None or "")
+                - Other values: Exact match
+            group_id: Group ID
+                - Not provided or QUERY_ALL ("__all__"): Don't filter by group_id
+                - None or "": Filter for null/empty values (records with group_id as None or "")
+                - Other values: Exact match
+            start_time: Optional start time (inclusive)
+            end_time: Optional end time (exclusive)
             limit: Limit number of returned records
             skip: Number of records to skip
             sort_desc: Whether to sort by time in descending order
             session: Optional MongoDB session, for transaction support
-            model: Returned model type, default is EventLogRecord (full version), can pass EventLogRecordShort
+            model: Returned model type, default is EventLogRecord (full version), can pass EventLogRecordProjection
 
         Returns:
             List of event log objects of specified type
         """
         try:
+            # Build query filter
+            filter_dict = {}
+
+            # Handle time range filter
+            if start_time is not None and end_time is not None:
+                filter_dict["timestamp"] = {"$gte": start_time, "$lt": end_time}
+            elif start_time is not None:
+                filter_dict["timestamp"] = {"$gte": start_time}
+            elif end_time is not None:
+                filter_dict["timestamp"] = {"$lt": end_time}
+
+            # Handle user_id filter
+            if user_id != QUERY_ALL:
+                if user_id == "" or user_id is None:
+                    # Explicitly filter for null or empty string
+                    filter_dict["user_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["user_id"] = user_id
+
+            # Handle group_id filter
+            if group_id != QUERY_ALL:
+                if group_id == "" or group_id is None:
+                    # Explicitly filter for null or empty string
+                    filter_dict["group_id"] = {"$in": [None, ""]}
+                else:
+                    filter_dict["group_id"] = group_id
+
             # If model is not specified, use full version
             target_model = model if model is not None else self.model
-
-            # Determine whether to use projection based on model type
-            if target_model == self.model:
-                query = self.model.find({"user_id": user_id}, session=session)
-            else:
-                query = self.model.find(
-                    {"user_id": user_id}, projection_model=target_model, session=session
-                )
-
-            if sort_desc:
-                query = query.sort("-timestamp")
-            else:
-                query = query.sort("timestamp")
-
-            if skip:
-                query = query.skip(skip)
-            if limit:
-                query = query.limit(limit)
-
-            results = await query.to_list()
-            logger.debug(
-                "✅ Retrieved event logs by user ID successfully: %s, found %d records (model=%s)",
-                user_id,
-                len(results),
-                target_model.__name__,
-            )
-            return results
-        except Exception as e:
-            logger.error("❌ Failed to retrieve event logs by user ID: %s", e)
-            return []
-
-    async def find_by_time_range(
-        self,
-        start_time: datetime,
-        end_time: datetime,
-        user_id: Optional[str] = None,
-        limit: Optional[int] = None,
-        skip: Optional[int] = None,
-        sort_desc: bool = False,
-        session: Optional[AsyncClientSession] = None,
-        model: Optional[Type[T]] = None,
-    ) -> List[Union[EventLogRecord, EventLogRecordProjection]]:
-        """
-        Query event logs by time range
-
-        Args:
-            start_time: Start time
-            end_time: End time
-            user_id: Optional user ID filter
-            limit: Limit number of returned records
-            skip: Number of records to skip
-            sort_desc: Whether to sort by time in descending order, default False (ascending)
-            session: Optional MongoDB session, for transaction support
-            model: Returned model type, default is EventLogRecord (full version), can pass EventLogRecordShort
-
-        Returns:
-            List of event log objects of specified type
-        """
-        try:
-            # If model is not specified, use full version
-            target_model = model if model is not None else self.model
-
-            filter_dict = {"timestamp": {"$gte": start_time, "$lt": end_time}}
-            if user_id:
-                filter_dict["user_id"] = user_id
 
             # Determine whether to use projection based on model type
             if target_model == self.model:
@@ -265,7 +240,9 @@ class EventLogRecordRawRepository(BaseRepository[EventLogRecord]):
 
             results = await query.to_list()
             logger.debug(
-                "✅ Queried event logs by time range successfully: Time range: %s - %s, found %d records (model=%s)",
+                "✅ Retrieved event logs successfully: user_id=%s, group_id=%s, time_range=[%s, %s), found %d records (model=%s)",
+                user_id,
+                group_id,
                 start_time,
                 end_time,
                 len(results),
@@ -273,7 +250,7 @@ class EventLogRecordRawRepository(BaseRepository[EventLogRecord]):
             )
             return results
         except Exception as e:
-            logger.error("❌ Failed to query event logs by time range: %s", e)
+            logger.error("❌ Failed to retrieve event logs: %s", e)
             return []
 
     async def delete_by_id(

@@ -27,6 +27,24 @@ def to_timezone(dt: datetime.datetime, tz: ZoneInfo = None) -> datetime.datetime
     return dt.astimezone(tz)
 
 
+def to_date_str(dt: datetime.datetime | None) -> str | None:
+    """Convert datetime to ISO date string (YYYY-MM-DD format).
+
+    Args:
+        dt: Datetime object to convert.
+
+    Returns:
+        ISO date string (e.g. "2025-01-07"), or None if input is None.
+
+    Example:
+        >>> to_date_str(datetime.datetime(2025, 1, 7, 9, 15, 33))
+        "2025-01-07"
+    """
+    if dt is None:
+        return None
+    return dt.date().isoformat()
+
+
 def to_iso_format(
     time_value: datetime.datetime | int | float | str | None,
 ) -> str | None:

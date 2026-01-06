@@ -34,7 +34,7 @@ class MemoryType(str, Enum):
     - EVENT_LOG: Event log (atomic facts)
 
     Not yet implemented or deprecated:
-    - BASE_MEMORY, PREFERENCE, MULTIPLE, CORE, ENTITY, RELATION, BEHAVIOR_HISTORY, GROUP_PROFILE
+    - BASE_MEMORY, PREFERENCE, CORE, ENTITY, RELATION, BEHAVIOR_HISTORY, GROUP_PROFILE
     """
 
     # ===== Implemented =====
@@ -46,7 +46,6 @@ class MemoryType(str, Enum):
     # ===== Not yet implemented or deprecated =====
     BASE_MEMORY = "base_memory"  # [Not implemented]
     PREFERENCE = "preference"  # [Not implemented]
-    MULTIPLE = "multiple"  # [Deprecated] Multi-type query
     CORE = "core"  # [Not implemented] Core memory
     ENTITY = "entity"  # [Not implemented]
     RELATION = "relation"  # [Not implemented]
@@ -64,6 +63,7 @@ class Metadata:
     memory_type: str  # Memory type
 
     # Optional fields
+    group_id: Optional[str] = None  # Group ID
     limit: Optional[int] = None  # Limit count
     email: Optional[str] = None  # Email
     phone: Optional[str] = None  # Phone number
@@ -142,6 +142,8 @@ class EpisodicMemoryModel:
     start_time: datetime = field(default_factory=get_now_with_timezone)
     end_time: Optional[datetime] = None
     key_events: List[str] = field(default_factory=list)
+    group_id: Optional[str] = None
+    group_name: Optional[str] = None
     created_at: datetime = field(default_factory=get_now_with_timezone)
     updated_at: datetime = field(default_factory=get_now_with_timezone)
     metadata: Metadata = field(default_factory=Metadata)

@@ -496,7 +496,7 @@ Retrieve user's core memory data through KV method.
 **Using curl**:
 
 ```bash
-curl -X GET "http://localhost:1995/api/v1/memories?user_id=user_123&memory_type=multiple&limit=20" \
+curl -X GET "http://localhost:1995/api/v1/memories?user_id=user_123&memory_type=episodic_memory&limit=20" \
   -H "Content-Type: application/json"
 ```
 
@@ -509,7 +509,7 @@ import asyncio
 async def fetch_memories():
     params = {
         "user_id": "user_123",
-        "memory_type": "multiple",
+        "memory_type": "episodic_memory",
         "limit": 20,
         "offset": 0
     }

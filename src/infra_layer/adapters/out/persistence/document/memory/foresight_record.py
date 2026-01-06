@@ -99,8 +99,9 @@ class ForesightRecord(DocumentBase, AuditBase):
         name = "foresight_records"
 
         indexes = [
-            # User ID index
+            # Single field indexes
             IndexModel([("user_id", ASCENDING)], name="idx_user_id"),
+            IndexModel([("group_id", ASCENDING)], name="idx_group_id", sparse=True),
             # Parent episodic memory index
             IndexModel([("parent_episode_id", ASCENDING)], name="idx_parent_episode"),
             # Composite index of user ID and parent episodic memory
@@ -108,8 +109,44 @@ class ForesightRecord(DocumentBase, AuditBase):
                 [("user_id", ASCENDING), ("parent_episode_id", ASCENDING)],
                 name="idx_user_parent",
             ),
-            # Group ID index
-            IndexModel([("group_id", ASCENDING)], name="idx_group_id", sparse=True),
+            # Composite index for time range queries (start_time, end_time)
+            IndexModel(
+                [("start_time", ASCENDING), ("end_time", ASCENDING)],
+                name="idx_time_range",
+                sparse=True,
+            ),
+            # Composite index of user ID and time range
+            IndexModel(
+                [
+                    ("user_id", ASCENDING),
+                    ("start_time", ASCENDING),
+                    ("end_time", ASCENDING),
+                ],
+                name="idx_user_time_range",
+                sparse=True,
+            ),
+            # Composite index of group ID and time range
+            IndexModel(
+                [
+                    ("group_id", ASCENDING),
+                    ("start_time", ASCENDING),
+                    ("end_time", ASCENDING),
+                ],
+                name="idx_group_time_range",
+                sparse=True,
+            ),
+            # Composite index of group ID, user ID and time range
+            # Note: This also covers (group_id, user_id) queries by left-prefix rule
+            IndexModel(
+                [
+                    ("group_id", ASCENDING),
+                    ("user_id", ASCENDING),
+                    ("start_time", ASCENDING),
+                    ("end_time", ASCENDING),
+                ],
+                name="idx_group_user_time_range",
+                sparse=True,
+            ),
             # Creation time index
             IndexModel([("created_at", DESCENDING)], name="idx_created_at"),
             # Update time index

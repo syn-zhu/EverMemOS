@@ -12,10 +12,20 @@ Usage:
     # Specify test user
     python tests/test_memory_controller.py --base-url http://dev-server:1995 --user-id test_user_123
     
+    # Test by category (batch execution)
+    python tests/test_memory_controller.py --test-method fetch      # Run all fetch tests
+    python tests/test_memory_controller.py --test-method retrieve   # Run all retrieve/search tests
+    python tests/test_memory_controller.py --test-method search     # Same as retrieve
+    python tests/test_memory_controller.py --test-method memorize   # Run memorization tests
+    python tests/test_memory_controller.py --test-method meta       # Run metadata tests
+    
     # Test a specific method
-    python tests/test_memory_controller.py --test-method memorize
     python tests/test_memory_controller.py --test-method fetch_episodic
     python tests/test_memory_controller.py --test-method fetch_event_log
+    python tests/test_memory_controller.py --test-method fetch_group_filter
+    python tests/test_memory_controller.py --test-method fetch_time_range
+    python tests/test_memory_controller.py --test-method fetch_combined_filters
+    python tests/test_memory_controller.py --test-method fetch_all_types
     python tests/test_memory_controller.py --test-method search_keyword
     
     # Test all methods except certain ones (parameters separated by commas)
@@ -481,14 +491,25 @@ class MemoryControllerTester:
         return status_code, response
 
     def test_fetch_episodic(self):
-        """Test 2: GET /api/v1/memories - Fetch user episodic memory (episodic_memory type, pass parameters via body)"""
+        """Test 2: GET /api/v1/memories - Fetch user episodic memory (episodic_memory type, pass parameters via body)
+
+        Tests multiple scenarios:
+        1. Only user_id (group_id NOT provided in request)
+        2. user_id + group_id=None (explicitly null)
+        3. user_id + group_id="" (explicitly empty string)
+        4. user_id + group_id both have valid values
+        5. user_id="__all__" + valid group_id
+        """
         self.print_section("Test 2: GET /api/v1/memories - Fetch User Episodic Memory")
 
+        # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
+        print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
         data = {
             "user_id": self.user_id,
             "memory_type": "episodic_memory",
             "limit": 10,
             "offset": 0,
+            # group_id is NOT in the request at all
         }
 
         status_code, response = self.call_get_with_body_api("", data)
@@ -530,24 +551,175 @@ class MemoryControllerTester:
                 ), f"Memory {idx} user_id should match"
 
             print(
-                f"✅ Fetch Episodic successful, returned {result['total_count']} episodic memories, deep structure validated"
+                f"✅ Scenario 1 successful, returned {result['total_count']} episodic memories"
             )
         else:
             print(
-                f"✅ Fetch Episodic successful, returned {result['total_count']} episodic memories"
+                f"✅ Scenario 1 successful, returned {result['total_count']} episodic memories"
+            )
+
+        # Scenario 2: user_id + group_id=None (explicitly null)
+        print("\n--- Scenario 2: user_id + group_id=None (explicitly null) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": None,  # Explicitly set to None
+            "memory_type": "episodic_memory",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} episodic memories with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} episodic memories"
+            )
+
+        # Scenario 3: user_id + group_id="" (explicitly empty string)
+        print("\n--- Scenario 3: user_id + group_id='' (explicitly empty string) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": "",  # Explicitly set to empty string
+            "memory_type": "episodic_memory",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} episodic memories with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} episodic memories"
+            )
+
+        # Scenario 4: user_id + group_id both have valid values
+        print("\n--- Scenario 4: user_id + group_id both have valid values ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+            "memory_type": "episodic_memory",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate metadata includes both user_id and group_id
+        metadata = result["metadata"]
+        assert metadata.get("user_id") == self.user_id, "metadata user_id should match"
+        assert (
+            metadata.get("group_id") == self.group_id
+        ), "metadata group_id should match"
+
+        # Validate that returned memories have the requested group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+                assert (
+                    memory.get("user_id") == self.user_id
+                ), f"Memory {idx} user_id should be {self.user_id}, actual: {memory.get('user_id')}"
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} episodic memories with matching filters"
+            )
+        else:
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} episodic memories"
+            )
+
+        # Scenario 5: user_id="__all__" + valid group_id
+        print("\n--- Scenario 5: user_id='__all__' + valid group_id ---")
+        data = {
+            "user_id": "__all__",
+            "group_id": self.group_id,
+            "memory_type": "episodic_memory",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate metadata includes group_id
+        metadata = result["metadata"]
+        assert (
+            metadata.get("group_id") == self.group_id
+        ), "metadata group_id should match"
+
+        # Validate that returned memories have the requested group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} episodic memories with group_id={self.group_id}"
+            )
+        else:
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} episodic memories"
             )
 
         return status_code, response
 
     def test_fetch_foresight(self):
-        """Test 3: GET /api/v1/memories - Fetch personal foresight (foresight type, pass parameters via body)"""
-        self.print_section("Test 3: GET /api/v1/memories - Fetch Personal Foresight")
+        """Test 3: GET /api/v1/memories - Fetch foresight (foresight type, pass parameters via body)
 
+        Tests multiple scenarios:
+        1. Only user_id (group_id NOT provided in request)
+        2. user_id + group_id=None (explicitly null)
+        3. user_id + group_id="" (explicitly empty string)
+        4. user_id + group_id both have valid values
+        5. user_id="__all__" + valid group_id
+        """
+        self.print_section("Test 3: GET /api/v1/memories - Fetch Foresight")
+
+        # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
+        print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
         data = {
             "user_id": self.user_id,
             "memory_type": "foresight",
             "limit": 10,
             "offset": 0,
+            # group_id is NOT in the request at all
         }
 
         status_code, response = self.call_get_with_body_api("", data)
@@ -586,27 +758,176 @@ class MemoryControllerTester:
                 assert (
                     "parent_episode_id" in memory
                 ), f"Memory {idx} should contain parent_episode_id"
-                # Personal foresight user_id may be None (group scenario), so not enforced
+                # Foresight user_id may be None (group scenario), so not enforced
 
             print(
-                f"✅ Fetch Personal Foresight successful, returned {result['total_count']} personal foresights, deep structure validated"
+                f"✅ Scenario 1 successful, returned {result['total_count']} foresights"
             )
         else:
             print(
-                f"✅ Fetch Personal Foresight successful, returned {result['total_count']} personal foresights"
+                f"✅ Scenario 1 successful, returned {result['total_count']} foresights"
+            )
+
+        # Scenario 2: user_id + group_id=None (explicitly null)
+        print("\n--- Scenario 2: user_id + group_id=None (explicitly null) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": None,  # Explicitly set to None
+            "memory_type": "foresight",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} foresights with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} foresights"
+            )
+
+        # Scenario 3: user_id + group_id="" (explicitly empty string)
+        print("\n--- Scenario 3: user_id + group_id='' (explicitly empty string) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": "",  # Explicitly set to empty string
+            "memory_type": "foresight",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} foresights with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} foresights"
+            )
+
+        # Scenario 4: user_id + group_id both have valid values
+        print("\n--- Scenario 4: user_id + group_id both have valid values ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+            "memory_type": "foresight",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate metadata includes both user_id and group_id
+        metadata = result["metadata"]
+        assert metadata.get("user_id") == self.user_id, "metadata user_id should match"
+        assert (
+            metadata.get("group_id") == self.group_id
+        ), "metadata group_id should match"
+
+        # Validate that returned memories have the requested group_id
+        # Note: foresight user_id may be None in some cases, so only validate group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} foresights with group_id={self.group_id}"
+            )
+        else:
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} foresights"
+            )
+
+        # Scenario 5: user_id="__all__" + valid group_id
+        print("\n--- Scenario 5: user_id='__all__' + valid group_id ---")
+        data = {
+            "user_id": "__all__",
+            "group_id": self.group_id,
+            "memory_type": "foresight",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate metadata includes group_id
+        metadata = result["metadata"]
+        assert (
+            metadata.get("group_id") == self.group_id
+        ), "metadata group_id should match"
+
+        # Validate that returned memories have the requested group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} foresights with group_id={self.group_id}"
+            )
+        else:
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} foresights"
             )
 
         return status_code, response
 
     def test_fetch_event_log(self):
-        """Test 4: GET /api/v1/memories - Fetch user event log (event_log type, pass parameters via body)"""
+        """Test 4: GET /api/v1/memories - Fetch user event log (event_log type, pass parameters via body)
+
+        Tests multiple scenarios:
+        1. Only user_id (group_id NOT provided in request)
+        2. user_id + group_id=None (explicitly null)
+        3. user_id + group_id="" (explicitly empty string)
+        4. user_id + group_id both have valid values
+        5. user_id="__all__" + valid group_id
+        """
         self.print_section("Test 4: GET /api/v1/memories - Fetch User Event Log")
 
+        # Scenario 1: Only user_id, group_id NOT provided (parameter doesn't exist)
+        print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
         data = {
             "user_id": self.user_id,
             "memory_type": "event_log",
             "limit": 10,
             "offset": 0,
+            # group_id is NOT in the request at all
         }
 
         status_code, response = self.call_get_with_body_api("", data)
@@ -651,13 +972,534 @@ class MemoryControllerTester:
                 ), f"Memory {idx} user_id should match"
 
             print(
-                f"✅ Fetch Event Log successful, returned {result['total_count']} event logs, deep structure validated"
+                f"✅ Scenario 1 successful, returned {result['total_count']} event logs"
             )
         else:
             print(
-                f"✅ Fetch Event Log successful, returned {result['total_count']} event logs"
+                f"✅ Scenario 1 successful, returned {result['total_count']} event logs"
             )
 
+        # Scenario 2: user_id + group_id=None (explicitly null)
+        print("\n--- Scenario 2: user_id + group_id=None (explicitly null) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": None,  # Explicitly set to None
+            "memory_type": "event_log",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} event logs with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} event logs"
+            )
+
+        # Scenario 3: user_id + group_id="" (explicitly empty string)
+        print("\n--- Scenario 3: user_id + group_id='' (explicitly empty string) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": "",  # Explicitly set to empty string
+            "memory_type": "event_log",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} event logs with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} event logs"
+            )
+
+        # Scenario 4: user_id + group_id both have valid values
+        print("\n--- Scenario 4: user_id + group_id both have valid values ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+            "memory_type": "event_log",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate metadata includes both user_id and group_id
+        metadata = result["metadata"]
+        assert metadata.get("user_id") == self.user_id, "metadata user_id should match"
+        assert (
+            metadata.get("group_id") == self.group_id
+        ), "metadata group_id should match"
+
+        # Validate that returned memories have the requested group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+                assert (
+                    memory.get("user_id") == self.user_id
+                ), f"Memory {idx} user_id should be {self.user_id}, actual: {memory.get('user_id')}"
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} event logs with matching filters"
+            )
+        else:
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} event logs"
+            )
+
+        # Scenario 5: user_id="__all__" + valid group_id
+        print("\n--- Scenario 5: user_id='__all__' + valid group_id ---")
+        data = {
+            "user_id": "__all__",
+            "group_id": self.group_id,
+            "memory_type": "event_log",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        result = response["result"]
+
+        # Validate metadata includes group_id
+        metadata = result["metadata"]
+        assert (
+            metadata.get("group_id") == self.group_id
+        ), "metadata group_id should match"
+
+        # Validate that returned memories have the requested group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} event logs with group_id={self.group_id}"
+            )
+        else:
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} event logs"
+            )
+
+        return status_code, response
+
+    def test_fetch_with_group_filter(self):
+        """Test: GET /api/v1/memories - Fetch memories with group_id filter"""
+        self.print_section("Test: GET /api/v1/memories - Fetch with group_id Filter")
+
+        # Test different memory types with group_id filter
+        memory_types = ["episodic_memory", "event_log", "foresight"]
+
+        for memory_type in memory_types:
+            print(f"\n--- Testing memory_type: {memory_type} with group_id ---")
+
+            data = {
+                "user_id": "__all__",  # Query all users
+                "group_id": self.group_id,  # Filter by group
+                "memory_type": memory_type,
+                "limit": 10,
+                "offset": 0,
+            }
+
+            status_code, response = self.call_get_with_body_api("", data)
+
+            # Assert: Validate response structure
+            assert (
+                status_code == 200
+            ), f"Status code should be 200, actual: {status_code}"
+            assert response.get("status") == "ok", f"Status should be ok"
+            assert "result" in response, "Response should contain result field"
+
+            result = response["result"]
+            assert "memories" in result, "result should contain memories field"
+            assert "total_count" in result, "result should contain total_count field"
+            assert "metadata" in result, "result should contain metadata field"
+
+            # Validate metadata
+            metadata = result["metadata"]
+            assert (
+                metadata.get("group_id") == self.group_id
+            ), "metadata group_id should match"
+
+            print(
+                f"✅ {memory_type} with group_id filter: {result['total_count']} records"
+            )
+
+        print(f"\n✅ Group Filter Test Completed")
+        return status_code, response
+
+    def test_fetch_with_time_range(self):
+        """Test: GET /api/v1/memories - Fetch memories with time range filter"""
+        self.print_section("Test: GET /api/v1/memories - Fetch with Time Range Filter")
+
+        now = datetime.now(ZoneInfo("UTC"))
+        start_time = (now - timedelta(days=30)).isoformat()
+        end_time = now.isoformat()
+
+        # Test different memory types with time range
+        memory_types = ["episodic_memory", "event_log", "foresight"]
+
+        for memory_type in memory_types:
+            print(f"\n--- Testing memory_type: {memory_type} with time_range ---")
+
+            data = {
+                "user_id": self.user_id,
+                "memory_type": memory_type,
+                "start_time": start_time,
+                "end_time": end_time,
+                "limit": 10,
+                "offset": 0,
+            }
+
+            status_code, response = self.call_get_with_body_api("", data)
+
+            # Assert: Validate response structure
+            assert (
+                status_code == 200
+            ), f"Status code should be 200, actual: {status_code}"
+            assert response.get("status") == "ok", f"Status should be ok"
+            assert "result" in response, "Response should contain result field"
+
+            result = response["result"]
+            assert "memories" in result, "result should contain memories field"
+            assert "total_count" in result, "result should contain total_count field"
+
+            # Validate time range in metadata
+            metadata = result["metadata"]
+            if "start_time" in metadata:
+                assert (
+                    metadata.get("start_time") == start_time
+                ), "metadata start_time should match"
+            if "end_time" in metadata:
+                assert (
+                    metadata.get("end_time") == end_time
+                ), "metadata end_time should match"
+
+            print(
+                f"✅ {memory_type} with time_range [{start_time[:10]} to {end_time[:10]}]: {result['total_count']} records"
+            )
+
+        print(f"\n✅ Time Range Filter Test Completed")
+        return status_code, response
+
+    def test_fetch_with_combined_filters(self):
+        """Test: GET /api/v1/memories - Fetch memories with combined filters (user_id + group_id + time_range)"""
+        self.print_section("Test: GET /api/v1/memories - Fetch with Combined Filters")
+
+        now = datetime.now(ZoneInfo("UTC"))
+        start_time = (now - timedelta(days=7)).isoformat()
+        end_time = now.isoformat()
+
+        # Test episodic_memory with all filters
+        print("\n--- Testing episodic_memory with user_id + group_id + time_range ---")
+
+        data = {
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+            "memory_type": "episodic_memory",
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+
+        # Assert: Validate response structure
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+        assert "result" in response, "Response should contain result field"
+
+        result = response["result"]
+        assert "memories" in result, "result should contain memories field"
+        assert "total_count" in result, "result should contain total_count field"
+
+        # Validate all filters are reflected in metadata
+        metadata = result["metadata"]
+        assert metadata.get("user_id") == self.user_id, "metadata user_id should match"
+        assert (
+            metadata.get("group_id") == self.group_id
+        ), "metadata group_id should match"
+
+        print(
+            f"✅ Combined filters (user + group + time): {result['total_count']} records"
+        )
+        print(f"\n✅ Combined Filters Test Completed")
+        return status_code, response
+
+    def test_fetch_profile_memory(self):
+        """Test: GET /api/v1/memories - Fetch user profile memory
+
+        Tests multiple scenarios:
+        1. Only user_id (group_id NOT provided)
+        2. user_id + group_id=None (explicitly null)
+        3. user_id + group_id="" (explicitly empty string)
+        4. user_id + group_id both have valid values
+        5. user_id="__all__" + valid group_id
+        """
+        self.print_section("Test: GET /api/v1/memories - Fetch User Profile Memory")
+
+        # Scenario 1: Only user_id, group_id NOT provided
+        print("\n--- Scenario 1: Only user_id (group_id NOT provided) ---")
+        data = {
+            "user_id": self.user_id,
+            "memory_type": "profile",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+
+        result = response["result"]
+        print(f"✅ Scenario 1 successful, returned {result['total_count']} profiles")
+
+        # Scenario 2: user_id + group_id=None (explicitly null)
+        print("\n--- Scenario 2: user_id + group_id=None (explicitly null) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": None,  # Explicitly set to None
+            "memory_type": "profile",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} profiles with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 2 successful, returned {result['total_count']} profiles"
+            )
+
+        # Scenario 3: user_id + group_id="" (explicitly empty string)
+        print("\n--- Scenario 3: user_id + group_id='' (explicitly empty string) ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": "",  # Explicitly set to empty string
+            "memory_type": "profile",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+
+        result = response["result"]
+
+        # Validate that returned memories have null or empty group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                group_id_value = memory.get("group_id")
+                assert group_id_value in (
+                    None,
+                    "",
+                ), f"Memory {idx} group_id should be None or empty string, actual: {group_id_value}"
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} profiles with null/empty group_id"
+            )
+        else:
+            print(
+                f"✅ Scenario 3 successful, returned {result['total_count']} profiles"
+            )
+
+        # Scenario 4: user_id + group_id both have valid values
+        print("\n--- Scenario 4: user_id + group_id both have valid values ---")
+        data = {
+            "user_id": self.user_id,
+            "group_id": self.group_id,
+            "memory_type": "profile",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+
+        result = response["result"]
+
+        # Validate that returned memories have the requested group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+                assert (
+                    memory.get("user_id") == self.user_id
+                ), f"Memory {idx} user_id should be {self.user_id}, actual: {memory.get('user_id')}"
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} profiles with matching filters"
+            )
+        else:
+            print(
+                f"✅ Scenario 4 successful, returned {result['total_count']} profiles"
+            )
+
+        # Scenario 5: user_id="__all__" + valid group_id
+        print("\n--- Scenario 5: user_id='__all__' + valid group_id ---")
+        data = {
+            "user_id": "__all__",
+            "group_id": self.group_id,
+            "memory_type": "profile",
+            "limit": 10,
+            "offset": 0,
+        }
+
+        status_code, response = self.call_get_with_body_api("", data)
+        assert status_code == 200, f"Status code should be 200, actual: {status_code}"
+        assert response.get("status") == "ok", f"Status should be ok"
+
+        result = response["result"]
+
+        # Validate that returned memories have the requested group_id
+        if result["total_count"] > 0 and len(result["memories"]) > 0:
+            for idx, memory in enumerate(result["memories"]):
+                assert (
+                    memory.get("group_id") == self.group_id
+                ), f"Memory {idx} group_id should be {self.group_id}, actual: {memory.get('group_id')}"
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} profiles with group_id={self.group_id}"
+            )
+        else:
+            print(
+                f"✅ Scenario 5 successful, returned {result['total_count']} profiles"
+            )
+
+        print(f"\n✅ Profile Memory Test Completed")
+        return status_code, response
+
+    def test_fetch_all_memory_types(self):
+        """Test: GET /api/v1/memories - Fetch all supported memory types
+
+        Note: Only tests with user_id as some memory types don't support group_id filtering:
+        - base_memory: Personal data, only supports specific user_id
+        - preference: Personal preferences, only supports specific user_id
+        - behavior_history: Personal behavior logs, only supports specific user_id
+        - entity: Not supported with group_id in current implementation
+        - relation: Not supported with group_id in current implementation
+
+        Memory types that support group_id are tested separately in:
+        - test_fetch_episodic() for episodic_memory
+        - test_fetch_event_log() for event_log
+        - test_fetch_foresight() for foresight
+        - test_fetch_profile_memory() for profile
+        """
+        self.print_section("Test: GET /api/v1/memories - Fetch All Memory Types")
+
+        # All supported memory types
+        memory_types = [
+            "episodic_memory",
+            "event_log",
+            "foresight",
+            "profile",
+            "base_memory",
+            "preference",
+            "entity",
+            "relation",
+            "behavior_history",
+        ]
+
+        results_summary = []
+
+        for memory_type in memory_types:
+            print(f"\n--- Testing memory_type: {memory_type} ---")
+
+            data = {
+                "user_id": self.user_id,
+                "memory_type": memory_type,
+                "limit": 10,
+                "offset": 0,
+            }
+
+            status_code, response = self.call_get_with_body_api("", data)
+
+            # Assert: Basic validation
+            assert status_code == 200, f"Status code should be 200 for {memory_type}"
+            assert (
+                response.get("status") == "ok"
+            ), f"Status should be ok for {memory_type}"
+            assert (
+                "result" in response
+            ), f"Response should contain result field for {memory_type}"
+
+            result = response["result"]
+            assert (
+                "memories" in result
+            ), f"result should contain memories for {memory_type}"
+            assert (
+                "total_count" in result
+            ), f"result should contain total_count for {memory_type}"
+
+            results_summary.append(
+                {"memory_type": memory_type, "total_count": result["total_count"]}
+            )
+
+            print(f"✅ {memory_type}: {result['total_count']} records")
+
+        # Print summary
+        print("\n" + "=" * 80)
+        print("  Memory Types Summary")
+        print("=" * 80)
+        for item in results_summary:
+            print(f"  {item['memory_type']:20s}: {item['total_count']:5d} records")
+        print("=" * 80)
+
+        print(f"\n✅ All Memory Types Test Completed")
         return status_code, response
 
     def test_search_memories_keyword(self):
@@ -951,10 +1793,18 @@ class MemoryControllerTester:
         Args:
             test_method: Specify test method to run, options:
                 - all: Run all tests
-                - memorize: Test storing conversation memory
+                - fetch: Run all fetch-related tests (batch)
+                - retrieve/search: Run all retrieve/search-related tests (batch)
+                - memorize: Test storing conversation memory / Run memorization tests (batch)
+                - meta: Run metadata-related tests (batch)
                 - fetch_episodic: Test fetching episodic memory
+                - fetch_foresight: Test fetching foresight memory
                 - fetch_event_log: Test fetching event log
+                - fetch_group_filter: Test fetching with group_id filter
+                - fetch_time_range: Test fetching with time range filter
+                - fetch_combined_filters: Test fetching with combined filters
                 - fetch_profile: Test fetching user profile
+                - fetch_all_types: Test fetching all memory types
                 - search_keyword: Test keyword search
                 - search_vector: Test vector search
                 - search_hybrid: Test hybrid search
@@ -989,11 +1839,38 @@ class MemoryControllerTester:
             "fetch_episodic": self.test_fetch_episodic,
             "fetch_foresight": self.test_fetch_foresight,
             "fetch_event_log": self.test_fetch_event_log,
+            "fetch_group_filter": self.test_fetch_with_group_filter,
+            "fetch_time_range": self.test_fetch_with_time_range,
+            "fetch_combined_filters": self.test_fetch_with_combined_filters,
+            "fetch_profile": self.test_fetch_profile_memory,
+            "fetch_all_types": self.test_fetch_all_memory_types,
             "search_keyword": self.test_search_memories_keyword,
             "search_vector": self.test_search_memories_vector,
             "search_hybrid": self.test_search_memories_hybrid,
             "save_meta": self.test_save_conversation_meta,
             "patch_meta": self.test_patch_conversation_meta,
+        }
+
+        # Define test type grouping
+        test_type_groups = {
+            "fetch": [
+                "fetch_episodic",
+                "fetch_foresight",
+                "fetch_event_log",
+                "fetch_group_filter",
+                "fetch_time_range",
+                "fetch_combined_filters",
+                "fetch_profile",
+                "fetch_all_types",
+            ],
+            "retrieve": ["search_keyword", "search_vector", "search_hybrid"],
+            "search": [  # Alias for retrieve
+                "search_keyword",
+                "search_vector",
+                "search_hybrid",
+            ],
+            "memorize": ["memorize"],
+            "meta": ["save_meta", "patch_meta"],
         }
 
         # Parse excluded test methods list
@@ -1010,7 +1887,22 @@ class MemoryControllerTester:
 
         # Execute tests
         try:
-            if except_test_methods:
+            if test_method in test_type_groups:
+                # Batch mode: Run tests by category (fetch, retrieve, search, memorize, meta)
+                method_names = test_type_groups[test_method]
+                methods_to_run = [
+                    (name, test_methods[name])
+                    for name in method_names
+                    if name in test_methods
+                ]
+
+                print(
+                    f"\n📋 Will run {len(methods_to_run)} test methods in [{test_method}] category"
+                )
+                for name, method in methods_to_run:
+                    method()
+
+            elif except_test_methods:
                 # except-test-method mode: Run all tests except specified ones
                 methods_to_run = [
                     (name, method)
@@ -1045,7 +1937,9 @@ class MemoryControllerTester:
 
         # Tests completed
         self.print_section("Tests Completed")
-        if except_test_methods:
+        if test_method in test_type_groups:
+            print(f"\n✅ All [{test_method}] category tests passed!")
+        elif except_test_methods:
             print(f"\n✅ Completed all tests except [{except_test_methods}]!")
         elif test_method == "all":
             print("\n✅ All interface structure validations passed!")
@@ -1141,17 +2035,28 @@ Usage Examples:
         default="all",
         choices=[
             "all",
+            # Batch categories
+            "fetch",
+            "retrieve",
+            "search",
             "memorize",
+            "meta",
+            # Individual methods
             "fetch_episodic",
             "fetch_foresight",
             "fetch_event_log",
+            "fetch_group_filter",
+            "fetch_time_range",
+            "fetch_combined_filters",
+            "fetch_profile",
+            "fetch_all_types",
             "search_keyword",
             "search_vector",
             "search_hybrid",
             "save_meta",
             "patch_meta",
         ],
-        help="Specify test method to run (default: all runs all tests)",
+        help="Specify test method to run (default: all). Supports batch categories (fetch, retrieve/search, memorize, meta) or individual test methods",
     )
 
     parser.add_argument(
@@ -1179,7 +2084,7 @@ def main():
     if args.test_method != "all" and args.except_test_method:
         print("❌ Error: Cannot use both --test-method and --except-test-method")
         print("   Please choose one:")
-        print("   - Use --test-method to specify a single test to run")
+        print("   - Use --test-method to specify a test or category to run")
         print(
             "   - Use --except-test-method to specify tests to exclude (run all others)"
         )
@@ -1225,7 +2130,7 @@ def main():
         sync_mode=args.sync_mode,
     )
 
-    # Run tests (decide to run all, single, or exclude certain tests based on parameters)
+    # Run tests (decide to run all, single, by category, or exclude certain tests based on parameters)
     tester.run_all_tests(
         test_method=args.test_method, except_test_methods=args.except_test_method
     )
