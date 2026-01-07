@@ -11,7 +11,7 @@ Usage:
     app = FastAPI()
     app.add_middleware(PrometheusMiddleware)
 """
-import re
+from core.observation.logger import get_logger
 import time
 from typing import Callable
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -19,6 +19,8 @@ from starlette.requests import Request
 from starlette.responses import Response
 from prometheus_client import Counter, Histogram
 from core.observation.metrics.registry import get_metrics_registry
+
+logger = get_logger(__name__)
 
 
 # Pre-defined HTTP metrics (following Prometheus naming conventions)
@@ -58,19 +60,61 @@ _http_response_size_bytes = Histogram(
 )
 
 
-def _normalize_path(path: str) -> str:
+def _get_fastapi_route_template(request: Request) -> str:
     """
-    Normalize path to reduce cardinality.
-    
+    Get the actual route template from FastAPI request.
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        str: Route template string, empty string if not available
+    """
+    try:
+        # Get route info from request.scope (available after request processing)
+        if hasattr(request, 'scope') and 'route' in request.scope:
+            route = request.scope['route']
+            if hasattr(route, 'path'):
+                return route.path
+
+        # If no route in scope, try to infer from path_params
+        if hasattr(request, 'path_params') and request.path_params:
+            path = request.url.path
+            for param_name, param_value in request.path_params.items():
+                if str(param_value) in path:
+                    path = path.replace(str(param_value), f"{{{param_name}}}")
+            return path
+
+    except Exception as e:
+        logger.debug("Failed to get FastAPI route template: %s", str(e))
+
+    return ""
+
+
+def _normalize_path(request: Request) -> str:
+    """
+    Get normalized path label, prefer FastAPI route template.
+
+    Strategy:
+    1. Try to get actual route template from FastAPI route info
+    2. Mark unmatched paths as {unmatched}
+
     Examples:
-        /api/v1/users/123 → /api/v1/users/{id}
-        /api/v1/memory/abc-def-123 → /api/v1/memory/{id}
+    - /api/users/123 -> /api/users/{user_id} (FastAPI route template)
+    - /unknown/path -> {unmatched} (unmatched path)
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        str: Normalized path
     """
-    # Replace UUIDs
-    path = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '{id}', path)
-    # Replace numeric IDs
-    path = re.sub(r'/\d+', '/{id}', path)
-    return path
+    route_template = _get_fastapi_route_template(request)
+    if route_template:
+        return route_template
+
+    return '{unmatched}'
+
 
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
@@ -101,18 +145,17 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.SKIP_PATHS:
             return await call_next(request)
         
-        # Normalize path to reduce label cardinality
-        path = _normalize_path(request.url.path)
         method = request.method
         
-        # Record request size
+        # Record request size (before processing)
+        request_size = 0
         if request.headers.get('content-length'):
             request_size = int(request.headers.get('content-length', 0))
-            _http_request_size_bytes.labels(method=method, path=path).observe(request_size)
         
         # Time the request
         start_time = time.perf_counter()
         status = '500'  # Default to 500 in case of unhandled exception
+        response = None
         
         try:
             response = await call_next(request)
@@ -120,6 +163,9 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         except Exception:
             raise
         finally:
+            # Get path AFTER call_next - route info is now available
+            path = _normalize_path(request)
+            
             # Record metrics
             duration = time.perf_counter() - start_time
             
@@ -133,9 +179,13 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
                 method=method,
                 path=path,
             ).observe(duration)
+            
+            # Record request size
+            if request_size > 0:
+                _http_request_size_bytes.labels(method=method, path=path).observe(request_size)
         
         # Record response size
-        if hasattr(response, 'headers') and response.headers.get('content-length'):
+        if response and hasattr(response, 'headers') and response.headers.get('content-length'):
             response_size = int(response.headers.get('content-length', 0))
             _http_response_size_bytes.labels(method=method, path=path).observe(response_size)
         
