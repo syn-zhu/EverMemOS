@@ -700,11 +700,10 @@ class MemoryManager:
             request.memory_types[0].value if request.memory_types else 'unknown'
         )
 
-        kw_results = await self.get_keyword_search_results(
-            request, retrieve_method=retrieve_method
-        )
-        vec_results = await self.get_vector_search_results(
-            request, retrieve_method=retrieve_method
+        # Run keyword and vector search concurrently
+        kw_results, vec_results = await asyncio.gather(
+            self.get_keyword_search_results(request, retrieve_method=retrieve_method),
+            self.get_vector_search_results(request, retrieve_method=retrieve_method),
         )
         # Deduplicate by id
         seen_ids = {h.get('id') for h in kw_results}
@@ -725,11 +724,10 @@ class MemoryManager:
             request.memory_types[0].value if request.memory_types else 'unknown'
         )
 
-        kw = await self.get_keyword_search_results(
-            request, retrieve_method=retrieve_method
-        )
-        vec = await self.get_vector_search_results(
-            request, retrieve_method=retrieve_method
+        # Run keyword and vector search concurrently
+        kw, vec = await asyncio.gather(
+            self.get_keyword_search_results(request, retrieve_method=retrieve_method),
+            self.get_vector_search_results(request, retrieve_method=retrieve_method),
         )
 
         # RRF fusion with stage metrics

@@ -433,6 +433,8 @@ class ExtractionState:
     scene: str
     is_assistant_scene: bool
     participants: List[str]
+    parent_type: str = None
+    parent_id: str = None
     group_episode: Optional[EpisodeMemory] = None
     group_episode_memories: List[EpisodeMemory] = None
     episode_memories: List[EpisodeMemory] = None
@@ -442,6 +444,11 @@ class ExtractionState:
         self.group_episode_memories = []
         self.episode_memories = []
         self.parent_docs_map = {}
+        # Set default parent info from memcell
+        if self.parent_type is None:
+            self.parent_type = DEFAULT_MEMORIZE_CONFIG.default_parent_type
+        if self.parent_id is None:
+            self.parent_id = self.memcell.event_id
 
 
 async def process_memory_extraction(
@@ -673,8 +680,8 @@ async def _extract_foresights(
     for mem in result:
         mem.group_id = state.request.group_id
         mem.group_name = state.request.group_name
-        mem.parent_type = DEFAULT_MEMORIZE_CONFIG.default_parent_type
-        mem.parent_id = state.memcell.event_id
+        mem.parent_type = state.parent_type
+        mem.parent_id = state.parent_id
     return result
 
 
@@ -689,8 +696,8 @@ async def _extract_event_logs(
         return []
     result.group_id = state.request.group_id
     result.group_name = state.request.group_name
-    result.parent_type = DEFAULT_MEMORIZE_CONFIG.default_parent_type
-    result.parent_id = state.memcell.event_id
+    result.parent_type = state.parent_type
+    result.parent_id = state.parent_id
     return [result]
 
 
