@@ -93,6 +93,22 @@ class MemoryController(BaseController):
                 "description": "Successfully stored memory data",
                 "content": {
                     "application/json": {
+                        "schema": {
+                            "title": "MemorizeResponse",
+                            "type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "message": {"type": "string"},
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "saved_memories": {"type": "array"},
+                                        "count": {"type": "integer"},
+                                        "status_info": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
                         "examples": {
                             "extracted": {
                                 "summary": "Extracted memories (boundary triggered)",
@@ -118,7 +134,7 @@ class MemoryController(BaseController):
                                     },
                                 },
                             },
-                        }
+                        },
                     }
                 },
             },
@@ -284,6 +300,23 @@ class MemoryController(BaseController):
                 "description": "Successfully retrieved memory data",
                 "content": {
                     "application/json": {
+                        "schema": {
+                            "title": "FetchMemoriesResponse",
+                            "type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "message": {"type": "string"},
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "memories": {"type": "array"},
+                                        "total_count": {"type": "integer"},
+                                        "has_more": {"type": "boolean"},
+                                        "metadata": {"type": "object"},
+                                    },
+                                },
+                            },
+                        },
                         "example": {
                             "status": "ok",
                             "message": "Memory retrieval successful",
@@ -305,7 +338,7 @@ class MemoryController(BaseController):
                                     "memory_type": "fetch",
                                 },
                             },
-                        }
+                        },
                     }
                 },
             },
@@ -447,6 +480,25 @@ class MemoryController(BaseController):
                 "description": "Successfully retrieved memory data",
                 "content": {
                     "application/json": {
+                        "schema": {
+                            "title": "SearchMemoriesResponse",
+                            "type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "message": {"type": "string"},
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "groups": {"type": "array"},
+                                        "importance_scores": {"type": "array"},
+                                        "total_count": {"type": "integer"},
+                                        "has_more": {"type": "boolean"},
+                                        "query_metadata": {"type": "object"},
+                                        "metadata": {"type": "object"},
+                                    },
+                                },
+                            },
+                        },
                         "example": {
                             "status": "ok",
                             "message": "Memory retrieval successful",
@@ -481,7 +533,7 @@ class MemoryController(BaseController):
                                     "memory_type": "retrieve",
                                 },
                             },
-                        }
+                        },
                     }
                 },
             },
@@ -617,6 +669,24 @@ class MemoryController(BaseController):
                 "description": "Successfully retrieved conversation metadata",
                 "content": {
                     "application/json": {
+                        "schema": {
+                            "title": "GetConversationMetaResponse",
+                            "type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "message": {"type": "string"},
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "group_id": {"type": "string"},
+                                        "scene": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "is_default": {"type": "boolean"},
+                                    },
+                                },
+                            },
+                        },
                         "examples": {
                             "found": {
                                 "summary": "Found by group_id",
@@ -646,7 +716,7 @@ class MemoryController(BaseController):
                                     },
                                 },
                             },
-                        }
+                        },
                     }
                 },
             },
@@ -748,6 +818,70 @@ class MemoryController(BaseController):
         - This is a full update interface that will replace the entire record
         - If you only need to update partial fields, use the PATCH /conversation-meta interface
         """,
+        responses={
+            200: {
+                "description": "Successfully saved conversation metadata",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "SaveConversationMetaResponse",
+                            "type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "message": {"type": "string"},
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "group_id": {"type": "string"},
+                                        "scene": {"type": "string"},
+                                        "name": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                        "example": {
+                            "status": "ok",
+                            "message": "Conversation metadata saved successfully",
+                            "result": {
+                                "id": "507f1f77bcf86cd799439011",
+                                "group_id": "group_123",
+                                "scene": "group_chat",
+                                "name": "Project Discussion",
+                            },
+                        },
+                    }
+                },
+            },
+            400: {
+                "description": "Request parameter error",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "status": ErrorStatus.FAILED.value,
+                            "code": ErrorCode.INVALID_PARAMETER.value,
+                            "message": "Field 'scene': invalid scene value",
+                            "timestamp": "2025-01-15T10:30:00+00:00",
+                            "path": "/api/v1/memories/conversation-meta",
+                        }
+                    }
+                },
+            },
+            500: {
+                "description": "Internal server error",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "status": ErrorStatus.FAILED.value,
+                            "code": ErrorCode.SYSTEM_ERROR.value,
+                            "message": "Failed to save conversation metadata, please try again later",
+                            "timestamp": "2025-01-15T10:30:00+00:00",
+                            "path": "/api/v1/memories/conversation-meta",
+                        }
+                    }
+                },
+            },
+        },
     )
     async def save_conversation_meta(
         self,
@@ -850,6 +984,23 @@ class MemoryController(BaseController):
                 "description": "Successfully updated conversation metadata",
                 "content": {
                     "application/json": {
+                        "schema": {
+                            "title": "PatchConversationMetaResponse",
+                            "type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "message": {"type": "string"},
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "group_id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "updated_fields": {"type": "array"},
+                                    },
+                                },
+                            },
+                        },
                         "example": {
                             "status": "ok",
                             "message": "Conversation metadata updated successfully",
@@ -859,7 +1010,7 @@ class MemoryController(BaseController):
                                 "name": "New conversation name",
                                 "updated_fields": ["name", "tags"],
                             },
-                        }
+                        },
                     }
                 },
             },
@@ -1053,6 +1204,21 @@ class MemoryController(BaseController):
                 "description": "Successfully deleted memories",
                 "content": {
                     "application/json": {
+                        "schema": {
+                            "title": "DeleteMemoriesResponse",
+                            "type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "message": {"type": "string"},
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "filters": {"type": "array"},
+                                        "count": {"type": "integer"},
+                                    },
+                                },
+                            },
+                        },
                         "examples": {
                             "single": {
                                 "summary": "Delete by event_id only",
@@ -1081,7 +1247,7 @@ class MemoryController(BaseController):
                                     },
                                 },
                             },
-                        }
+                        },
                     }
                 },
             },
