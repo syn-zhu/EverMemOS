@@ -1,11 +1,12 @@
 """
 Memory Controller - Unified memory management controller
 
-Provides complete memory management RESTful API routes, including:
-- Memory storage (memorize): Receive simple direct single message format and store
-- Conversation metadata (conversation-meta): Save conversation metadata information
-- Memory retrieval (fetch): Retrieve user core memories via GET method
-- Memory search (search): Support three retrieval methods: keyword, vector, and hybrid
+Provides RESTful API routes for:
+- Memory ingestion (POST /memories): accept a single-message payload and create memories
+- Memory fetch (GET /memories): fetch by memory_type with optional user/group/time filters (query params or JSON body)
+- Memory search (GET /memories/search): keyword/vector/hybrid/rrf/agentic retrieval with grouped results
+- Conversation metadata (GET/POST/PATCH /conversation-meta): get with default fallback, upsert, and partial update
+- Memory deletion (DELETE /memories): soft delete by combined filters
 """
 
 import json
@@ -16,27 +17,27 @@ from fastapi import HTTPException, Request as FastAPIRequest
 
 from core.di.decorators import controller
 from core.di import get_bean_by_type
-from core.interface.controller.base_controller import BaseController, get, post, patch, delete
+from core.interface.controller.base_controller import (
+    BaseController,
+    get,
+    post,
+    patch,
+    delete,
+)
 from core.constants.errors import ErrorCode, ErrorStatus
+from core.constants.exceptions import ValidationException, BaseException
 from agentic_layer.memory_manager import MemoryManager
 from api_specs.request_converter import (
     convert_simple_message_to_memorize_request,
     convert_dict_to_fetch_mem_request,
     convert_dict_to_retrieve_mem_request,
 )
-from api_specs.dtos.memory_query import ConversationMetaRequest, UserDetail
-from infra_layer.adapters.out.persistence.document.memory.conversation_meta import (
-    ConversationMeta,
-    UserDetailModel,
-)
-from infra_layer.adapters.out.persistence.repository.conversation_meta_raw_repository import (
-    ConversationMetaRawRepository,
-)
 from infra_layer.adapters.input.api.dto.memory_dto import (
     MemorizeMessageRequest,
     FetchMemoriesParams,
     SearchMemoriesRequest,
     ConversationMetaCreateRequest,
+    ConversationMetaGetRequest,
     ConversationMetaPatchRequest,
     DeleteMemoriesRequest,
 )
@@ -45,6 +46,7 @@ from core.request import log_request
 from core.component.redis_provider import RedisProvider
 from service.memory_request_log_service import MemoryRequestLogService
 from service.memcell_delete_service import MemCellDeleteService
+from service.conversation_meta_service import ConversationMetaService
 from api_specs.memory_types import RawDataType
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ class MemoryController(BaseController):
     Memory Controller
     """
 
-    def __init__(self, conversation_meta_repository: ConversationMetaRawRepository):
+    def __init__(self, conversation_meta_service: ConversationMetaService):
         """Initialize controller"""
         super().__init__(
             prefix="/api/v1/memories",
@@ -64,11 +66,11 @@ class MemoryController(BaseController):
             default_auth="none",  # Adjust authentication strategy based on actual needs
         )
         self.memory_manager = MemoryManager()
-        self.conversation_meta_repository = conversation_meta_repository
+        self.conversation_meta_service = conversation_meta_service
         # Get RedisProvider
         self.redis_provider = get_bean_by_type(RedisProvider)
         logger.info(
-            "MemoryController initialized with MemoryManager and ConversationMetaRepository"
+            "MemoryController initialized with MemoryManager and ConversationMetaService"
         )
 
     @post(
@@ -76,22 +78,15 @@ class MemoryController(BaseController):
         response_model=Dict[str, Any],
         summary="Store single group chat message memory",
         description="""
-        Receive simple direct single message format and store as memory
+        Receive a single message payload and store it as memory
         
         ## Functionality:
-        - Receive simple direct single message data (no pre-conversion required)
-        - Extract single message into memory units (memcells)
-        - Suitable for real-time message processing scenarios
-        - Return list of saved memories
+        - Accept raw single-message data (no pre-conversion required)
+        - Create memories when enough context is available
+        - Response returns extraction count and status (saved memories are fetched via API)
         
         ## Interface description:
-        - Receive simple direct single message format, no conversion required
-        
-        ## Use cases:
-        - Real-time message stream processing
-        - Chatbot integration
-        - Message queue consumption
-        - Single message import
+        - Accept a simple single-message JSON payload
         """,
         responses={
             200: {
@@ -105,15 +100,7 @@ class MemoryController(BaseController):
                                     "status": "ok",
                                     "message": "Extracted 1 memories",
                                     "result": {
-                                        "saved_memories": [
-                                            {
-                                                "memory_type": "episode_memory",
-                                                "user_id": "user_001",
-                                                "group_id": "group_123",
-                                                "timestamp": "2025-01-15T10:00:00",
-                                                "content": "User discussed the technical solution for the new feature",
-                                            }
-                                        ],
+                                        "saved_memories": [],
                                         "count": 1,
                                         "status_info": "extracted",
                                     },
@@ -175,14 +162,15 @@ class MemoryController(BaseController):
         """
         Store single message memory data
 
-        Receive simple direct single message format, convert and store via group_chat_converter
+        Convert a single-message payload to a memory request and persist it.
+        If no memory is extracted, the message remains pending for later processing.
 
         Args:
             request: FastAPI request object
             request_body: Message request body (used for OpenAPI documentation only)
 
         Returns:
-            Dict[str, Any]: Memory storage response, containing list of saved memories
+            Dict[str, Any]: Memory storage response with extraction count and status info
 
         Raises:
             HTTPException: When request processing fails
@@ -273,24 +261,23 @@ class MemoryController(BaseController):
         response_model=Dict[str, Any],
         summary="Fetch user memories",
         description="""
-        Retrieve user's core memory data via KV method
+        Retrieve memory records by memory_type with optional filters
         
         ## Functionality:
-        - Directly retrieve stored core memories based on user ID
-        - Support multiple memory types: profile, episode_memory, foresight, event_log
-        - Support pagination and sorting
-        - Suitable for scenarios requiring quick retrieval of fixed user memory sets
+        - Fetch by user_id/group_id with optional time range filters
+        - Support memory types: profile, episodic_memory, event_log, foresight
+        - Accept parameters via query string or JSON body (GET with body supported)
+        - Suitable for quick lookup without full-text retrieval
         
         ## Memory type descriptions:
-        - **base_memory**: Base memory, user's basic information and commonly used data
-        - **profile**: User profile, containing user characteristics and attributes
-        - **preference**: User preferences, containing user likes and settings
-        - **episode_memory**: Episodic memory summaries
+        - **episodic_memory / event_log**: Filterable by timestamp
+        - **foresight**: Filtered by active time window
+        - **profile**: No time range filtering
         
         ## Use cases:
         - User profile display
         - Personalized recommendation systems
-        - User preference settings loading
+        - Conversation history review
         """,
         responses={
             200: {
@@ -303,11 +290,11 @@ class MemoryController(BaseController):
                             "result": {
                                 "memories": [
                                     {
-                                        "memory_type": "base_memory",
+                                        "memory_type": "episodic_memory",
                                         "user_id": "user_123",
                                         "timestamp": "2024-01-15T10:30:00",
-                                        "content": "User likes drinking coffee",
-                                        "summary": "Coffee preference",
+                                        "content": "User discussed coffee during the project sync",
+                                        "summary": "Project sync coffee note",
                                     }
                                 ],
                                 "total_count": 100,
@@ -360,8 +347,8 @@ class MemoryController(BaseController):
         """
         Retrieve user memory data
 
-        Directly retrieve stored core memories by user ID via KV method.
-        Parameters are passed via request body (GET with body, similar to Elasticsearch style).
+        Fetch memory records by memory_type with optional user/group/time filters.
+        Parameters are accepted from query params or request body (GET with body is supported).
 
         Args:
             fastapi_request: FastAPI request object
@@ -425,13 +412,13 @@ class MemoryController(BaseController):
     @get(
         "/search",
         response_model=Dict[str, Any],
-        summary="Search relevant memories (supports keyword/vector/hybrid search)",
+        summary="Search relevant memories (keyword/vector/hybrid/rrf/agentic)",
         description="""
-        Retrieve relevant memory data based on query text using keyword, vector, or hybrid methods
+        Retrieve relevant memory data based on query text using multiple retrieval methods
         
         ## Functionality:
         - Find most relevant memories based on query text
-        - Support three methods: keyword (BM25), vector similarity, and hybrid search
+        - Support keyword (BM25), vector similarity, hybrid search, RRF fusion, and agentic retrieval
         - Support time range filtering
         - Return results organized by group with relevance scores
         - Suitable for scenarios requiring exact matching or semantic retrieval
@@ -469,10 +456,10 @@ class MemoryController(BaseController):
                                         "group_id": "group_456",
                                         "memories": [
                                             {
-                                                "memory_type": "episode_memory",
+                                                "memory_type": "episodic_memory",
                                                 "user_id": "user_123",
                                                 "timestamp": "2024-01-15T10:30:00",
-                                                "summary": "Discussed coffee preference",
+                                                "summary": "Discussed coffee choices",
                                                 "group_id": "group_456",
                                             }
                                         ],
@@ -536,7 +523,7 @@ class MemoryController(BaseController):
         """
         Search relevant memory data
 
-        Retrieve relevant memory data based on query text using keyword, vector, or hybrid methods.
+        Retrieve relevant memory data based on query text using keyword, vector, hybrid, RRF, or agentic methods.
         Parameters are passed via request body (GET with body, similar to Elasticsearch style).
 
         Args:
@@ -576,7 +563,7 @@ class MemoryController(BaseController):
                 "After conversion: retrieve_method=%s", retrieve_request.retrieve_method
             )
 
-            # Use retrieve_mem method (supports keyword, vector, hybrid)
+            # Use retrieve_mem method (supports keyword, vector, hybrid, rrf, agentic)
             response = await self.memory_manager.retrieve_mem(retrieve_request)
 
             # Return unified response format
@@ -605,6 +592,142 @@ class MemoryController(BaseController):
                 detail="Failed to retrieve memory, please try again later",
             ) from e
 
+    @get(
+        "/conversation-meta",
+        response_model=Dict[str, Any],
+        summary="Get conversation metadata",
+        description="""
+        Retrieve conversation metadata by group_id with fallback to default config
+        
+        ## Functionality:
+        - Query by group_id to get conversation metadata
+        - If group_id not found, fallback to default config
+        - If group_id not provided, returns default config
+        
+        ## Fallback Logic:
+        - Try exact group_id first, then use default config
+        
+        ## Use Cases:
+        - Get specific group's metadata
+        - Get default settings (group_id not provided or null)
+        - Auto-fallback to defaults when group config not set
+        """,
+        responses={
+            200: {
+                "description": "Successfully retrieved conversation metadata",
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "found": {
+                                "summary": "Found by group_id",
+                                "value": {
+                                    "status": "ok",
+                                    "message": "Conversation metadata retrieved successfully",
+                                    "result": {
+                                        "id": "507f1f77bcf86cd799439011",
+                                        "group_id": "group_123",
+                                        "scene": "group_chat",
+                                        "name": "Project Discussion",
+                                        "is_default": False,
+                                    },
+                                },
+                            },
+                            "fallback": {
+                                "summary": "Fallback to default config",
+                                "value": {
+                                    "status": "ok",
+                                    "message": "Using default config",
+                                    "result": {
+                                        "id": "507f1f77bcf86cd799439012",
+                                        "group_id": None,
+                                        "scene": "group_chat",
+                                        "name": "Default Settings",
+                                        "is_default": True,
+                                    },
+                                },
+                            },
+                        }
+                    }
+                },
+            },
+            404: {
+                "description": "Conversation metadata not found",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "status": "failed",
+                            "message": "Conversation metadata not found for group_id: group_123",
+                        }
+                    }
+                },
+            },
+        },
+    )
+    async def get_conversation_meta(
+        self,
+        fastapi_request: FastAPIRequest,
+        request_body: ConversationMetaGetRequest = None,  # OpenAPI documentation only
+    ) -> Dict[str, Any]:
+        """
+        Get conversation metadata by group_id with fallback support
+
+        Args:
+            fastapi_request: FastAPI request object
+            request_body: Get request parameters (used for OpenAPI documentation only)
+
+        Returns:
+            Dict[str, Any]: Conversation metadata response
+
+        Raises:
+            HTTPException: When request processing fails
+        """
+        del request_body  # Used for OpenAPI documentation only
+        try:
+            # Get params from query params first
+            params = dict(fastapi_request.query_params)
+
+            # Also try to get params from body (for GET + body requests)
+            if body := await fastapi_request.body():
+                with suppress(json.JSONDecodeError, TypeError):
+                    if isinstance(body_data := json.loads(body), dict):
+                        params.update(body_data)
+
+            group_id = params.get("group_id")
+
+            logger.info("Received conversation-meta get request: group_id=%s", group_id)
+
+            # Query via service (fallback to default is handled internally)
+            result = await self.conversation_meta_service.get_by_group_id(group_id)
+
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Conversation metadata not found for group_id: {group_id}",
+                )
+
+            message = (
+                "Using default config"
+                if result.is_default and group_id
+                else "Conversation metadata retrieved successfully"
+            )
+
+            return {
+                "status": ErrorStatus.OK.value,
+                "message": message,
+                "result": result.model_dump(),
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(
+                "conversation-meta get request processing failed: %s", e, exc_info=True
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to retrieve conversation metadata, please try again later",
+            ) from e
+
     @post(
         "/conversation-meta",
         response_model=Dict[str, Any],
@@ -615,7 +738,11 @@ class MemoryController(BaseController):
         ## Functionality:
         - If group_id exists, update the entire record (upsert)
         - If group_id does not exist, create a new record
+        - If group_id is omitted, save as default config for the scene
         - All fields must be provided with complete data
+        
+        ## Default Config:
+        - Default config is used as fallback when specific group_id config not found
         
         ## Notes:
         - This is a full update interface that will replace the entire record
@@ -630,7 +757,7 @@ class MemoryController(BaseController):
         """
         Save conversation metadata
 
-        Receive ConversationMetaRequest format data, convert to ConversationMeta ODM model and save to MongoDB
+        Save conversation metadata to MongoDB via service
 
         Args:
             fastapi_request: FastAPI request object
@@ -644,123 +771,44 @@ class MemoryController(BaseController):
         """
         del request_body  # Used for OpenAPI documentation only
         try:
-            # 1. Get JSON body from request
+            # 1. Parse request body into DTO
             request_data = await fastapi_request.json()
+            create_request = ConversationMetaCreateRequest(**request_data)
+
             logger.info(
                 "Received conversation-meta save request: group_id=%s",
-                request_data.get("group_id"),
+                create_request.group_id,
             )
 
-            # 2. Parse into ConversationMetaRequest
-            # Handle conversion of user_details
-            user_details_data = request_data.get("user_details", {})
-            user_details = {}
-            for user_id, detail_data in user_details_data.items():
-                user_details[user_id] = UserDetail(
-                    full_name=detail_data["full_name"],
-                    role=detail_data["role"],
-                    extra=detail_data.get("extra", {}),
-                )
+            # 2. Save via service
+            result = await self.conversation_meta_service.save(create_request)
 
-            conversation_meta_request = ConversationMetaRequest(
-                version=request_data["version"],
-                scene=request_data["scene"],
-                scene_desc=request_data["scene_desc"],
-                name=request_data["name"],
-                description=request_data["description"],
-                group_id=request_data["group_id"],
-                created_at=request_data["created_at"],
-                default_timezone=request_data["default_timezone"],
-                user_details=user_details,
-                tags=request_data.get("tags", []),
-            )
-
-            logger.info(
-                "Parsed ConversationMetaRequest successfully: group_id=%s",
-                conversation_meta_request.group_id,
-            )
-
-            # 3. Convert to ConversationMeta ODM model
-            user_details_model = {}
-            for user_id, detail in conversation_meta_request.user_details.items():
-                user_details_model[user_id] = UserDetailModel(
-                    full_name=detail.full_name, role=detail.role, extra=detail.extra
-                )
-
-            conversation_meta = ConversationMeta(
-                version=conversation_meta_request.version,
-                scene=conversation_meta_request.scene,
-                scene_desc=conversation_meta_request.scene_desc,
-                name=conversation_meta_request.name,
-                description=conversation_meta_request.description,
-                group_id=conversation_meta_request.group_id,
-                conversation_created_at=conversation_meta_request.created_at,
-                default_timezone=conversation_meta_request.default_timezone,
-                user_details=user_details_model,
-                tags=conversation_meta_request.tags,
-            )
-
-            # 4. Save using upsert method (update if group_id exists)
-            logger.info("Starting to save conversation metadata to MongoDB")
-            saved_meta = await self.conversation_meta_repository.upsert_by_group_id(
-                group_id=conversation_meta.group_id,
-                conversation_data={
-                    "version": conversation_meta.version,
-                    "scene": conversation_meta.scene,
-                    "scene_desc": conversation_meta.scene_desc,
-                    "name": conversation_meta.name,
-                    "description": conversation_meta.description,
-                    "conversation_created_at": conversation_meta.conversation_created_at,
-                    "default_timezone": conversation_meta.default_timezone,
-                    "user_details": conversation_meta.user_details,
-                    "tags": conversation_meta.tags,
-                },
-            )
-
-            if not saved_meta:
+            if not result:
                 raise HTTPException(
                     status_code=500, detail="Failed to save conversation metadata"
                 )
 
-            logger.info(
-                "Conversation metadata saved successfully: id=%s, group_id=%s",
-                saved_meta.id,
-                saved_meta.group_id,
-            )
-
-            # 5. Return success response
+            # 3. Return success response
             return {
                 "status": ErrorStatus.OK.value,
                 "message": "Conversation metadata saved successfully",
-                "result": {
-                    "id": str(saved_meta.id),
-                    "group_id": saved_meta.group_id,
-                    "scene": saved_meta.scene,
-                    "name": saved_meta.name,
-                    "version": saved_meta.version,
-                    "created_at": (
-                        saved_meta.created_at.isoformat()
-                        if saved_meta.created_at
-                        else None
-                    ),
-                    "updated_at": (
-                        saved_meta.updated_at.isoformat()
-                        if saved_meta.updated_at
-                        else None
-                    ),
-                },
+                "result": result.model_dump(),
             }
 
-        except KeyError as e:
-            logger.error("conversation-meta request missing required field: %s", e)
+        except ValidationException as e:
+            logger.error(
+                "conversation-meta validation failed: %s", e.message, exc_info=True
+            )
+            # ValidationException 的 message 已经包含了字段名和详细错误信息
+            # 例如: "Field 'scene': invalid scene value: company, allowed values: ['group_chat', 'assistant']"
             raise HTTPException(
-                status_code=400, detail=f"Missing required field: {str(e)}"
+                status_code=400,
+                detail=e.message,
             ) from e
         except ValueError as e:
             logger.error("conversation-meta request parameter error: %s", e)
             raise HTTPException(status_code=400, detail=str(e)) from e
         except HTTPException:
-            # Re-raise HTTPException
             raise
         except Exception as e:
             logger.error(
@@ -780,6 +828,7 @@ class MemoryController(BaseController):
         
         ## Functionality:
         - Locate the conversation metadata to update by group_id
+        - When group_id is null or not provided, updates the default config
         - Only update fields provided in the request, keep unchanged fields as-is
         - Suitable for scenarios requiring modification of partial information
         
@@ -792,7 +841,7 @@ class MemoryController(BaseController):
         - **default_timezone**: Default timezone
         
         ## Notes:
-        - group_id must exist, otherwise return 404 error
+        - group_id can be a specific value or omitted (for default config)
         - If user_details field is provided, it will completely replace existing user details
         - Not allowed to modify core fields such as version, scene, group_id, conversation_created_at
         """,
@@ -880,115 +929,65 @@ class MemoryController(BaseController):
         """
         del request_body  # Used for OpenAPI documentation only
         try:
-            # 1. Get JSON body from request
+            # 1. Parse request body into DTO
             request_data = await fastapi_request.json()
-            group_id = request_data.get("group_id")
-
-            # 2. Validate group_id is provided
-            if not group_id:
-                raise HTTPException(
-                    status_code=400, detail="Missing required field group_id"
-                )
+            patch_request = ConversationMetaPatchRequest(**request_data)
 
             logger.info(
                 "Received conversation-meta partial update request: group_id=%s",
-                group_id,
+                patch_request.group_id,
             )
 
-            # 3. Check if conversation metadata exists
-            existing_meta = await self.conversation_meta_repository.get_by_group_id(
-                group_id
+            # 2. Patch via service
+            result, updated_fields = await self.conversation_meta_service.patch(
+                patch_request
             )
-            if not existing_meta:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Specified conversation metadata not found: {group_id}",
+
+            if result is None:
+                detail_msg = (
+                    f"Specified conversation metadata not found: group_id={patch_request.group_id}"
+                    if patch_request.group_id
+                    else "Default config not found"
                 )
+                raise HTTPException(status_code=404, detail=detail_msg)
 
-            # 4. Prepare update data (exclude immutable fields and null values)
-            # Core fields not allowed to be modified via PATCH
-            immutable_fields = {
-                "version",
-                "scene",
-                "group_id",
-                "conversation_created_at",
-            }
-
-            update_data = {}
-            updated_fields = []
-
-            # Handle regular fields
-            for key, value in request_data.items():
-                if key in immutable_fields or key == "group_id":
-                    continue
-
-                # Handle user_details field
-                if key == "user_details" and value is not None:
-                    user_details_model = {}
-                    for user_id, detail_data in value.items():
-                        user_details_model[user_id] = UserDetailModel(
-                            full_name=detail_data["full_name"],
-                            role=detail_data["role"],
-                            extra=detail_data.get("extra", {}),
-                        )
-                    update_data["user_details"] = user_details_model
-                    updated_fields.append(key)
-                elif value is not None:
-                    update_data[key] = value
-                    updated_fields.append(key)
-
-            # 5. If no fields need updating
-            if not update_data:
-                logger.warning("No fields provided for update: group_id=%s", group_id)
+            # 3. Return success response
+            if not updated_fields:
                 return {
                     "status": ErrorStatus.OK.value,
                     "message": "No fields need updating",
                     "result": {
-                        "id": str(existing_meta.id),
-                        "group_id": existing_meta.group_id,
+                        "id": result.id,
+                        "group_id": result.group_id,
                         "updated_fields": [],
                     },
                 }
 
-            # 6. Perform update
-            logger.info(
-                "Starting to update conversation metadata, updating fields: %s",
-                updated_fields,
-            )
-            updated_meta = await self.conversation_meta_repository.update_by_group_id(
-                group_id=group_id, update_data=update_data
-            )
-
-            if not updated_meta:
-                raise HTTPException(
-                    status_code=500, detail="Failed to update conversation metadata"
-                )
-
-            logger.info(
-                "Conversation metadata updated successfully: id=%s, group_id=%s, updated_fields=%s",
-                updated_meta.id,
-                updated_meta.group_id,
-                updated_fields,
-            )
-
-            # 7. Return success response
             return {
                 "status": ErrorStatus.OK.value,
                 "message": f"Conversation metadata updated successfully, updated {len(updated_fields)} fields",
                 "result": {
-                    "id": str(updated_meta.id),
-                    "group_id": updated_meta.group_id,
-                    "scene": updated_meta.scene,
-                    "name": updated_meta.name,
+                    "id": result.id,
+                    "group_id": result.group_id,
+                    "scene": result.scene,
+                    "name": result.name,
                     "updated_fields": updated_fields,
-                    "updated_at": (
-                        updated_meta.updated_at.isoformat()
-                        if updated_meta.updated_at
-                        else None
-                    ),
+                    "updated_at": result.updated_at,
                 },
             }
 
+        except ValidationException as e:
+            logger.error(
+                "conversation-meta partial update validation failed: %s",
+                e.message,
+                exc_info=True,
+            )
+            # ValidationException 的 message 已经包含了字段名和详细错误信息
+            # 例如: "Field 'scene': invalid scene value: company, allowed values: ['group_chat', 'assistant']"
+            raise HTTPException(
+                status_code=400,
+                detail=e.message,
+            ) from e
         except HTTPException:
             # Re-raise HTTPException
             raise
@@ -1020,13 +1019,12 @@ class MemoryController(BaseController):
         response_model=Dict[str, Any],
         summary="Delete memories (soft delete)",
         description="""
-        Soft delete MemCell records based on combined filter criteria
+        Soft delete memory records based on combined filter criteria
         
         ## Functionality:
         - Soft delete records matching combined filter conditions
         - If multiple conditions provided, ALL must be satisfied (AND logic)
-        - Use MAGIC_ALL ("__all__") to skip a specific filter
-        - At least one filter must be specified (not all MAGIC_ALL)
+        - At least one filter must be specified
         
         ## Filter Parameters (combined with AND):
         - **event_id**: Filter by specific event_id
@@ -1061,10 +1059,7 @@ class MemoryController(BaseController):
                                 "value": {
                                     "status": "ok",
                                     "message": "Successfully deleted 1 memory",
-                                    "result": {
-                                        "filters": ["event_id"],
-                                        "count": 1,
-                                    },
+                                    "result": {"filters": ["event_id"], "count": 1},
                                 },
                             },
                             "batch_user": {
@@ -1072,10 +1067,7 @@ class MemoryController(BaseController):
                                 "value": {
                                     "status": "ok",
                                     "message": "Successfully deleted 25 memories",
-                                    "result": {
-                                        "filters": ["user_id"],
-                                        "count": 25,
-                                    },
+                                    "result": {"filters": ["user_id"], "count": 25},
                                 },
                             },
                             "combined": {
@@ -1100,7 +1092,7 @@ class MemoryController(BaseController):
                         "example": {
                             "status": ErrorStatus.FAILED.value,
                             "code": ErrorCode.INVALID_PARAMETER.value,
-                            "message": "At least one of event_id, user_id, or group_id must be provided (not MAGIC_ALL)",
+                            "message": "At least one of event_id, user_id, or group_id must be provided",
                             "timestamp": "2025-01-15T10:30:00+00:00",
                             "path": "/api/v1/memories",
                         }
@@ -1145,7 +1137,7 @@ class MemoryController(BaseController):
         """
         Soft delete memory data based on combined filter criteria
 
-        Filters are combined with AND logic. Use MAGIC_ALL to skip a filter.
+        Filters are combined with AND logic. Omit any filter you do not want to apply.
 
         Args:
             fastapi_request: FastAPI request object
@@ -1158,7 +1150,7 @@ class MemoryController(BaseController):
             HTTPException: When request processing fails
         """
         del request_body  # Used for OpenAPI documentation only
-        
+
         try:
             from core.oxm.constants import MAGIC_ALL
 
@@ -1201,15 +1193,12 @@ class MemoryController(BaseController):
 
             # Check if deletion was successful
             if not result["success"]:
-                error_msg = result.get("error", "No memories found matching the criteria or already deleted")
-                logger.warning(
-                    "Delete operation returned no results: %s",
-                    result,
+                error_msg = result.get(
+                    "error",
+                    "No memories found matching the criteria or already deleted",
                 )
-                raise HTTPException(
-                    status_code=404,
-                    detail=error_msg,
-                )
+                logger.warning("Delete operation returned no results: %s", result)
+                raise HTTPException(status_code=404, detail=error_msg)
 
             # Log successful deletion
             logger.info(
@@ -1222,10 +1211,7 @@ class MemoryController(BaseController):
             return {
                 "status": ErrorStatus.OK.value,
                 "message": f"Successfully deleted {result['count']} {'memory' if result['count'] == 1 else 'memories'}",
-                "result": {
-                    "filters": result["filters"],
-                    "count": result["count"],
-                },
+                "result": {"filters": result["filters"], "count": result["count"]},
             }
 
         except HTTPException:
