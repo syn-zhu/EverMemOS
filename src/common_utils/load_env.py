@@ -50,15 +50,14 @@ def load_env_file(
     env_file_path = PROJECT_DIR / env_file_name
 
     if not env_file_path.exists():
-        logger.warning(".env file does not exist: %s", env_file_path)
-        return False
-
-    try:
-        load_dotenv(env_file_path)
-        logger.debug("Successfully loaded .env file: %s", env_file_path)
-    except (IOError, OSError) as e:
-        logger.error("Failed to load .env file: %s", e)
-        return False
+        logger.info(".env file not found: %s, skipping file load", env_file_path)
+    else:
+        try:
+            load_dotenv(env_file_path)
+            logger.debug("Successfully loaded .env file: %s", env_file_path)
+        except (IOError, OSError) as e:
+            logger.error("Failed to load .env file: %s", e)
+            return False
 
     if check_env_var and os.getenv(check_env_var):
         logger.info("%s is set, environment variables have been loaded", check_env_var)
