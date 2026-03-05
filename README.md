@@ -13,13 +13,13 @@
 [![License][license-badge]][license]
 
 
-<!-- <p><strong>Share EverMemOS Repository</strong></p>
+<p><strong>Share EverMemOS Repository</strong></p>
 
 [![][share-x-shield]][share-x-link]
 [![][share-linkedin-shield]][share-linkedin-link]
 [![][share-reddit-shield]][share-reddit-link]
 [![][share-telegram-shield]][share-telegram-link]
-[![][share-whatsapp-shield]][share-whatsapp-link]
+<!-- [![][share-whatsapp-shield]][share-whatsapp-link]
 [![][share-mastodon-shield]][share-mastodon-link]
 [![][share-weibo-shield]][share-weibo-link] -->
 
@@ -33,11 +33,13 @@
 
 <br>
 
+[![Image](https://github.com/user-attachments/assets/739a0939-ab1d-4659-81c4-0842466afde9)](https://luma.com/n88icl03)
+
 > [!IMPORTANT]
 >
 > ### Memory Genesis Competition 2026
 > 
-> Join our AI Memory Competition! Build innovative applications, plugins, or infrastructure improvements powered by EverMemOS.
+> Join our AI [Memory Competition](https://luma.com/n88icl03)! Build innovative applications, plugins, or infrastructure improvements powered by EverMemOS.
 > 
 > **Tracks:**
 > - **Agent + Memory** - Build intelligent agents with long-term, evolving memories
@@ -46,15 +48,12 @@
 > 
 > **[Get Started with the Competition Starter Kit](docs/STARTER_KIT.md)** 
 > 
-> Join our [Discord](https://discord.gg/gYep5nQRZJ) to find teammates and brainstorm ideas!
+> Join our [Discord](https://discord.gg/gYep5nQRZJ) to ask anything you want. AMA session is open to everyone and occurs biweekly.
 > 
 
 <br>
 
-![divider][divider-light]
-![divider][divider-dark]
-
-<details open>
+<!-- <details>
 <summary><kbd>Table of Contents</kbd></summary>
 
 <br>
@@ -78,7 +77,7 @@
 
 <br>
 
-</details>
+</details> -->
 
 ## Welcome to EverMemOS
 
@@ -86,24 +85,90 @@ Welcome to EverMemOS! Join our community to help improve the project and collabo
 
 | Community | Purpose |
 | :-------- | :------ |
-| [![Discord][discord-badge]][discord] | Join our Discord community |
-| [![WeChat][wechat-badge]][wechat] | Join the WeChat discussion group |
-| [![X][x-badge]][x] | Follow updates on X |
+| [![Discord Members][discord-members-badge]][discord] | Join the EverMind Discord community to connect with other users |
+| [![WeChat][wechat-badge]][wechat] | Join the EverMind WeChat group for discussion and updates |
+<!-- | [![X][x-badge]][x] | Follow updates on X |
 | [![LinkedIn][linkedin-badge]][linkedin] | Connect with us on LinkedIn |
 | [![Hugging Face Space][hugging-face-badge]][hugging-face] | Join our Hugging Face community to explore our spaces and models |
-| [![Reddit][reddit-badge]][reddit] | Join the Reddit community |
-
-
-<br>
-
-<a id="star-us"></a>
-## 🌟 Star and stay tuned with us 
-
-![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
+| [![Reddit][reddit-badge]][reddit] | Join the Reddit community | -->
 
 <br>
 
-## Introduction
+## Usecases
+
+![Image](https://github.com/user-attachments/assets/0c3eb2c5-3a15-4d09-8dee-c38f96422168)
+
+**OpenClaw Long-Term Memory Plugin(coming this week)**
+
+Claw is putting the pieces of his memory together. Imagine a 24/7 agent with continuous learning memory that you can carry with you wherever you go next.
+
+
+![divider][divider-light]
+![divider][divider-dark]
+
+<br>
+
+[![Image](https://github.com/user-attachments/assets/a80bdab3-e5d0-43b9-9e8d-0a9605012a26)](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-EverMemOS)
+
+**Live2D Character with Memory**
+
+Add long-term memory to your anime character that can talk to you in real-time powered by [TEN Framework](https://github.com/TEN-framework/ten-framework).
+See the [Live2D Character with Memory Example](https://github.com/TEN-framework/ten-framework/tree/main/ai_agents/agents/examples/voice-assistant-with-EverMemOS) for more details.
+
+
+![divider][divider-light]
+![divider][divider-dark]
+
+<br>
+
+[![Image](https://github.com/user-attachments/assets/0d306b4c-bcd7-4e9e-a244-22fa3cb7b727)](https://screenshot-analysis-vercel.vercel.app/)
+
+**Computer-Use with Memory**
+
+Use computer-use to launch screenshot to do analysis all in your memory.
+See the [live demo](https://screenshot-analysis-vercel.vercel.app/) for more details.
+
+
+![divider][divider-light]
+![divider][divider-dark]
+
+<br>
+
+
+[![Image](https://github.com/user-attachments/assets/d1efe507-4eb7-4867-8996-457497333449)](https://github.com/EverMind-AI/evermem_got_demo)
+
+**Game of Thrones Memories**
+
+A demonstration of AI memory infrastructure through an interactive Q&A experience with "A Game of Thrones" 
+See the [code](https://github.com/EverMind-AI/evermem_got_demo) for more details.
+
+![divider][divider-light]
+![divider][divider-dark]
+
+<br>
+
+[![Image](https://github.com/user-attachments/assets/b40b2241-b0e6-4fc9-9a35-92139f3a2d81)](https://github.com/EverMind-AI/evermem-claude-code)
+
+**EverMemOS Claude Code Plugin**
+
+Persistent memory for Claude Code. Automatically saves and recalls context from past coding sessions.
+See the [code](https://github.com/EverMind-AI/evermem-claude-code) for more details.
+
+![divider][divider-light]
+![divider][divider-dark]
+
+<br>
+
+[![Image](https://github.com/user-attachments/assets/6586e647-dd5f-4f9f-9b26-66f930e8241c)](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html)
+
+**Visualize Memories with Graphs**
+
+Memory Graph view that visualizes your stored entities and how they relate, this is a pure frontend demo which hasn't been plugged with the backend yet, we are working on it.
+See the [live demo](https://main.d2j21qxnymu6wl.amplifyapp.com/graph.html).
+
+
+
+<!-- ## Introduction
 
 > 💬 **More than memory — it's foresight.**
 
@@ -133,9 +198,14 @@ Welcome to EverMemOS! Join our community to help improve the project and collabo
   <img src="https://github.com/user-attachments/assets/a6ff7523-db24-40f5-96ab-aa94f41b2392" alt="EverMemOS Benchmark Results" width="800"/>
   <br>
   <em>EverMemOS outperforms existing memory systems across all major benchmarks</em>
-</p>
+</p> -->
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## Quick Start
 
@@ -180,6 +250,11 @@ curl http://localhost:1995/health
 ✅ Server running at `http://localhost:1995` • [Full Setup Guide](docs/installation/SETUP.md)
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## Basic Usage
 
@@ -214,6 +289,11 @@ for memory_group in result.get("memories", []):
 📖 [More Examples](docs/usage/USAGE_EXAMPLES.md) • 📚 [API Reference](docs/api_docs/memory_api.md) • 🎯 [Interactive Demos](docs/usage/DEMOS.md)
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## Demo
 
@@ -242,6 +322,11 @@ uv run python src/bootstrap.py demo/chat_with_memory.py
 See the [Demo Guide](docs/usage/DEMOS.md) for details.
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## Advanced Techniques
 
@@ -251,6 +336,11 @@ See the [Demo Guide](docs/usage/DEMOS.md) for details.
 - **[Batch Operations](docs/usage/BATCH_OPERATIONS.md)** - Process multiple messages efficiently
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## Documentation
 
@@ -265,6 +355,11 @@ See the [Demo Guide](docs/usage/DEMOS.md) for details.
 | [Evaluation Guide][evaluation-guide] | Benchmark testing |
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## Evaluation & Benchmarking
 
@@ -301,6 +396,11 @@ cat evaluation/results/locomo-evermemos/report.txt
 📊 [Full Evaluation Guide](evaluation/README.md) • 📈 [Complete Results](https://huggingface.co/datasets/EverMind-AI/EverMemOS_Eval_Results)
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## GitHub Codespaces
 
@@ -333,6 +433,11 @@ EverMemOS supports [GitHub Codespaces](https://github.com/features/codespaces) f
 All infrastructure services (MongoDB, Elasticsearch, Milvus, Redis) start automatically and are pre-configured to work together.
 
 <br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
 
 ## Questions
 
@@ -341,6 +446,20 @@ EverMemOS is available on these AI-powered Q&A platforms. They can help you find
 | Service | Link |
 | ------- | ---- |
 | DeepWiki | [![Ask DeepWiki][deepwiki-badge]][deepwiki] |
+
+<br>
+<div align="right">
+
+[![][back-to-top]][readme-top]
+
+</div>
+
+<br>
+
+<a id="star-us"></a>
+## 🌟 Star and stay tuned with us 
+
+![star us gif](https://github.com/user-attachments/assets/0c512570-945a-483a-9f47-8e067bd34484)
 
 <br>
 <div align="right">
@@ -415,10 +534,10 @@ Read our [Contribution Guidelines](CONTRIBUTING.md) for code standards and Git w
 [demo-section]: #demo
 
 <!-- Dividers -->
-[divider-light]: https://github.com/user-attachments/assets/aec54c94-ced9-4683-ae58-0a5a7ed803bd#gh-light-mode-only
+[divider-light]: https://github.com/user-attachments/assets/2e2bbcc6-e6d8-4227-83c6-0620fc96f761#gh-light-mode-only
 [divider-dark]: https://github.com/user-attachments/assets/d57fad08-4f49-4a1c-bdfc-f659a5d86150#gh-dark-mode-only
 
-[banner-gif]: https://github.com/user-attachments/assets/965d9f07-9f4b-4ac1-8d0f-a3f5391b7bf2
+[banner-gif]: https://github.com/user-attachments/assets/3f22c9a8-a8db-4061-accf-f04c055aa01b
 
 <!-- Header Badges -->
 [arxiv-badge]: https://img.shields.io/badge/arXiv-EverMemOS_Paper-F5C842?labelColor=gray&style=flat-square&logo=arxiv&logoColor=white
@@ -443,18 +562,17 @@ Read our [Contribution Guidelines](CONTRIBUTING.md) for code standards and Git w
 [lang-zh-badge]: https://img.shields.io/badge/简体中文-lightgrey?style=flat-square
 
 <!-- Community Badges -->
-[discord-badge]: https://img.shields.io/badge/Discord-EverMind-5865F2?style=flat&logo=discord&logoColor=white
+[discord-badge]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=Discord&color=5865F2&style=for-the-badge&logo=discord&logoColor=white
+[discord-members-badge]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FgYep5nQRZJ%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&suffix=%20members&label=Discord&color=404EED&style=for-the-badge&logo=discord&logoColor=white
 [hugging-face-badge]: https://img.shields.io/badge/Hugging_Face-EverMind-F5C842?style=flat&logo=huggingface&logoColor=white
 [x-badge]: https://img.shields.io/badge/X/Twitter-EverMind-000000?style=flat&logo=x&logoColor=white
 [linkedin-badge]: https://img.shields.io/badge/LinkedIn-EverMind-0A66C2?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyBmaWxsPSIjZmZmIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU%2BTGlua2VkSW48L3RpdGxlPjxwYXRoIGQ9Ik0yMC40NDcgMjAuNDUyaC0zLjU1NHYtNS41NjljMC0xLjMyOC0uMDI3LTMuMDM3LTEuODUyLTMuMDM3LTEuODUzIDAtMi4xMzYgMS40NDUtMi4xMzYgMi45Mzl2NS42NjdIOS4zNTFWOWgzLjQxNHYxLjU2MWguMDQ2Yy40NzctLjkgMS42MzctMS44NSAzLjM3LTEuODUgMy42MDEgMCA0LjI2NyAyLjM3IDQuMjY3IDUuNDU1djYuMjg2ek01LjMzNyA3LjQzM2MtMS4xNDQgMC0yLjA2My0uOTI2LTIuMDYzLTIuMDY1IDAtMS4xMzguOTItMi4wNjMgMi4wNjMtMi4wNjMgMS4xNCAwIDIuMDY0LjkyNSAyLjA2NCAyLjA2MyAwIDEuMTM5LS45MjUgMi4wNjUtMi4wNjQgMi4wNjV6bTEuNzgyIDEzLjAxOUgzLjU1NVY5aDMuNTY0djExLjQ1MnpNMjIuMjI1IDBIMS43NzFDLjc5MiAwIDAgLjc3NCAwIDEuNzI5djIwLjU0MkMwIDIzLjIyNy43OTIgMjQgMS43NzEgMjRoMjAuNDUxQzIzLjIgMjQgMjQgMjMuMjI3IDI0IDIyLjI3MVYxLjcyOUMyNCAuNzc0IDIzLjIgMCAyMi4yMjIgMGguMDAzeiIvPjwvc3ZnPg%3D%3D
 [reddit-badge]: https://img.shields.io/badge/Reddit-EverMind-FF4500?style=flat&logo=reddit&logoColor=white
-[wechat-badge]: https://img.shields.io/badge/WeChat-EverMind-07C160?style=flat&logo=wechat&logoColor=white
+[wechat-badge]: https://img.shields.io/badge/WeChat-EverMind%20社区-07C160?style=for-the-badge&logo=wechat&logoColor=white
 
 <!-- Q&A Badges -->
 [deepwiki-badge]: https://deepwiki.com/badge.svg
 [readmex-badge]: https://raw.githubusercontent.com/CodePhiliaX/resource-trusteeship/main/readmex.svg
-[wechat-badge]: https://img.shields.io/badge/WeChat-EverMemOS-07C160?style=flat&logo=wechat&logoColor=white
-
 <!-- Misc Badges -->
 [back-to-top]: https://img.shields.io/badge/-Back_to_top-gray?style=flat-square
 [star-us]: #star-us
