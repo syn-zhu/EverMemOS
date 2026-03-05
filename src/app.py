@@ -11,7 +11,9 @@ from core.observation.logger import get_logger
 from core.interface.controller.base_controller import BaseController
 from core.middleware.user_context_middleware import UserContextMiddleware
 from core.middleware.app_logic_middleware import AppLogicMiddleware
+from core.middleware.tenant_middleware import TenantMiddleware
 from core.middleware.prometheus_middleware import PrometheusMiddleware
+from core.tenants.tenant_config import get_tenant_config
 from fastapi.middleware import Middleware
 
 from base_app import create_base_app
@@ -124,7 +126,14 @@ def create_business_app(
     fastapi_app.user_middleware.append(Middleware(AppLogicMiddleware))
     # Not directly interfacing with users
     # fastapi_app.user_middleware.append(Middleware(UserContextMiddleware))
-    
+
+    # Add tenant context middleware when multi-tenant mode is active
+    # (TENANT_NON_TENANT_MODE=false and no TENANT_SINGLE_TENANT_ID set)
+    tenant_config = get_tenant_config()
+    if not tenant_config.non_tenant_mode and not tenant_config.single_tenant_id:
+        fastapi_app.user_middleware.append(Middleware(TenantMiddleware))
+        logger.info("TenantMiddleware registered (multi-tenant mode)")
+
     # Add Prometheus HTTP metrics middleware
     fastapi_app.user_middleware.append(Middleware(PrometheusMiddleware))
 

@@ -30,6 +30,7 @@ class TenantConfig:
         """Initialize tenant configuration"""
         self._non_tenant_mode: Optional[bool] = None
         self._single_tenant_id: Optional[str] = None
+        self._tenant_header_name: Optional[str] = None
         self._app_ready: bool = (
             False  # Application startup completion status, used for strict tenant checks
         )
@@ -90,6 +91,26 @@ class TenantConfig:
         return self._single_tenant_id
 
     @property
+    def tenant_header_name(self) -> str:
+        """
+        Get the HTTP header name used to extract tenant ID
+
+        Read configuration from environment variable TENANT_HEADER_NAME.
+        Defaults to "X-Tenant-Id".
+
+        Returns:
+            str: HTTP header name for tenant ID extraction
+        """
+        if self._tenant_header_name is None:
+            self._tenant_header_name = os.getenv("TENANT_HEADER_NAME", "X-Tenant-Id").strip()
+            if not self._tenant_header_name:
+                self._tenant_header_name = "X-Tenant-Id"
+            logger.info(
+                "Tenant header name configured: %s", self._tenant_header_name
+            )
+        return self._tenant_header_name
+
+    @property
     def app_ready(self) -> bool:
         """
         Get application startup completion status
@@ -136,6 +157,7 @@ class TenantConfig:
         """
         self._non_tenant_mode = None
         self._single_tenant_id = None
+        self._tenant_header_name = None
         logger.info("🔄 Tenant configuration reloaded")
 
     def reset_app_ready(self) -> None:
